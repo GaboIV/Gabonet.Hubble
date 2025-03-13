@@ -1,0 +1,144 @@
+# Archivos y carpetas específicos de .NET
+## Archivos de compilación
+bin/
+obj/
+out/
+
+## Archivos de Visual Studio
+.vs/
+.vscode/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+*.pfx
+*.publishsettings
+orleans.codegen.cs
+
+## Archivos de Rider
+.idea/
+*.sln.iml
+.idea/
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
+
+## Archivos de NuGet
+*.nupkg
+# Ignorar la carpeta packages, excepto build/, que se usa como destino de MSBuild
+**/packages/*
+!**/packages/build/
+# Descomente si es necesario, pero generalmente se recomienda no incluir los archivos project.json.lock
+# project.lock.json
+# project.fragment.lock.json
+artifacts/
+
+## Archivos de Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+## Archivos de compilación de .NET Core
+project.lock.json
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+
+## Archivos de caché de compilación
+*.dll
+*.exe
+*.pdb
+*.cache
+*.bak
+
+## Archivos de registro
+*.log
+*.tlog
+*.vspscc
+*.vssscc
+.builds
+
+## Archivos temporales
+*.tmp
+*.temp
+*.swp
+*~
+~$*
+
+## Archivos de respaldo
+*.bak
+*.backup
+*.[Bb]ak
+
+## Archivos de configuración local
+appsettings.Development.json
+appsettings.local.json
+appsettings.*.json
+!appsettings.json
+!appsettings.Example.json
+
+## Archivos de secretos
+*.secret
+*.secrets
+secrets.json
+**/Properties/launchSettings.json
+
+## Archivos de prueba
+TestResults/
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+## Archivos específicos de la plataforma
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.directory
+.Trash-*
+
+## Archivos de cobertura de código
+*.coverage
+*.coveragexml
+coverage/
+coverage.json
+coverage.info
+coverage.lcov
+
+## Archivos de análisis de código
+*.dotCover
+*.dotSettings
+*.DotSettings.user
+
+## Archivos de publicación
+**/publish/
+**/PublishProfiles/
+**/PublishOutput/
+
+## Archivos de Azure
+csx/
+*.build.csdef
+ecf/
+rcf/
+
+## Archivos de Node.js (si se usa en el proyecto)
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log 
