@@ -230,12 +230,13 @@ public class HubbleDbCommandInterceptor : DbCommandInterceptor
             {
                 var method = frame.GetMethod();
                 var declaringType = method?.DeclaringType;
+                var fullName = declaringType?.FullName;
                 
-                if (declaringType != null && 
-                    !declaringType.FullName.StartsWith("Microsoft.EntityFrameworkCore") &&
-                    !declaringType.FullName.StartsWith("Gabonet.Hubble"))
+                if (declaringType != null && fullName != null && 
+                    !fullName.StartsWith("Microsoft.EntityFrameworkCore") &&
+                    !fullName.StartsWith("Gabonet.Hubble"))
                 {
-                    return $"{declaringType.Name}.{method.Name}";
+                    return $"{declaringType.Name ?? "Unknown"}.{method?.Name ?? "Unknown"}";
                 }
             }
         }

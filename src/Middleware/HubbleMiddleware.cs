@@ -162,10 +162,10 @@ public class HubbleMiddleware
         }
     }
 
-    private bool ShouldIgnoreRequest(HttpContext context, string path)
+    private bool ShouldIgnoreRequest(HttpContext context, string? path)
     {
         // Ignorar rutas específicas
-        if (_options.IgnorePaths != null)
+        if (_options.IgnorePaths != null && path != null)
         {
             foreach (var ignorePath in _options.IgnorePaths)
             {
@@ -177,7 +177,7 @@ public class HubbleMiddleware
         }
 
         // Ignorar rutas de Hubble
-        if (path.StartsWith("/hubble") || path.StartsWith("/api/hubble"))
+        if (path != null && (path.StartsWith("/hubble") || path.StartsWith("/api/hubble")))
         {
             return true;
         }

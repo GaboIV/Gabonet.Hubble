@@ -78,7 +78,100 @@ public class MyDbContext : DbContext
 }
 ```
 
-### 3. Accessing the User Interface
+### 3. Capturing MongoDB Queries
+
+Para un monitoreo completo de MongoDB, puedes implementar un contexto personalizado que automáticamente rastrea todas las consultas:
+
+```csharp
+using MongoDB.Bson;
+using MongoDB.Driver;
+using Microsoft.AspNetCore.Http;
+using MongoDB.Driver.Core.Events;
+using Microsoft.Extensions.Logging;
+using Gabonet.Hubble.Models;
+using Gabonet.Hubble.Extensions;
+using Microsoft.Extensions.Configuration;
+
+public class MongoDbContext
+{
+    private readonly IMongoDatabase _database;
+    private readonly ILogger<MongoDbContext> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    // Tus colecciones
+    public IMongoCollection<User> Users { get; private set; }
+    public IMongoCollection<Account> Accounts { get; private set; }
+    public IMongoCollection<Profile> Profiles { get; private set; }
+    // Otras colecciones...
+
+    public MongoDbContext(
+        IConfiguration configuration, 
+        ILogger<MongoDbContext> logger,
+        IHttpContextAccessor httpContextAccessor
+    ) {
+        _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
+        var mongoConnectionString = Environment.GetEnvironmentVariable("MONGO_CONNECTION_STRING");
+        var mongoDatabaseName = Environment.GetEnvironmentVariable("MONGO_DATABASE_NAME");
+
+        try
+        {
+            var settings = MongoClientSettings.FromConnectionString(mongoConnectionString);
+
+            // Configurar la suscripción de eventos de MongoDB para el monitoreo de Hubble
+            settings.ClusterConfigurator = cb =>
+            {
+                cb.Subscribe<CommandStartedEvent>(e =>
+                {
+                    _logger.LogInformation("Mongo Query: {CommandName} - {Command}", e.CommandName, e.Command.ToJson());
+                    
+                    // Capturar la consulta para Hubble
+                    if (_httpContextAccessor.HttpContext != null)
+                    {
+                        var query = new DatabaseQueryLog(
+                            databaseType: "MongoDB",
+                            databaseName: mongoDatabaseName,
+                            query: e.Command.ToJson(),
+                            parameters: null,
+                            callerMethod: MongoDbExtensions.GetCallerMethod(),
+                            tableName: e.Command.GetCollectionName(),
+                            operationType: e.CommandName
+                        );
+                        
+                        _httpContextAccessor.HttpContext.AddDatabaseQuery(query);
+                    }
+                });
+            };
+
+            var client = new MongoClient(settings);
+            _database = client.GetDatabase(mongoDatabaseName);
+
+            // Inicializar colecciones
+            Users = _database.GetCollection<User>("User");
+            Accounts = _database.GetCollection<Account>("Account");
+            Profiles = _database.GetCollection<Profile>("Profile");
+            // Inicializar otras colecciones...
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error al inicializar el contexto de MongoDB.");
+        }
+    }
+
+    public IMongoCollection<T> GetCollection<T>(string collectionName)
+    {
+        return _database.GetCollection<T>(collectionName);
+    }
+}
+```
+
+Este enfoque proporciona un monitoreo detallado de todas las operaciones de MongoDB, incluyendo:
+- Contenido de la consulta y tipo de comando
+- Nombre de la colección siendo accedida
+- Información del método llamador
+- Integración automática con el seguimiento de solicitudes HTTP de Hubble
+
+### 4. Accessing the User Interface
 
 Once configured, you can access the Hubble user interface by navigating to:
 

@@ -29,7 +29,7 @@ public static class ServiceCollectionExtensions
         string connectionString,
         string databaseName,
         string serviceName = "HubbleService",
-        string timeZoneId = null)
+        string? timeZoneId = null)
     {
         // Registrar el cliente de MongoDB
         var mongoClient = new MongoClient(connectionString);
@@ -42,7 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IHubbleService>(provider =>
         {
             var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
-            return new HubbleService(mongoClient, databaseName, httpContextAccessor, serviceName, timeZoneId);
+            return new HubbleService(mongoClient, databaseName, httpContextAccessor, serviceName, timeZoneId ?? "Universal");
         });
 
         // Registrar el controlador de Hubble

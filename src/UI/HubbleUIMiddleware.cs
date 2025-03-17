@@ -103,7 +103,7 @@ public class HubbleUIMiddleware
 
             // Obtener el controlador de Hubble
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-            var html = await hubbleController.GetLogDetailAsync(id);
+            var html = await hubbleController.GetLogDetailAsync(id ?? "");
 
             context.Response.ContentType = "text/html";
             await context.Response.WriteAsync(html);

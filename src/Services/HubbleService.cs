@@ -31,7 +31,7 @@ public class HubbleService : IHubbleService
         string databaseName,
         IHttpContextAccessor httpContextAccessor,
         string serviceName = "HubbleService",
-        string timeZoneId = null)
+        string? timeZoneId = null)
     {
         var mongoDatabase = mongoClient.GetDatabase(databaseName);
         _logsCollection = mongoDatabase.GetCollection<GeneralLog>("HubbleLogs");
