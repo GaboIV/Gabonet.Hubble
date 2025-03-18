@@ -53,6 +53,8 @@ app.UseHubble();
 
 ### 2. Capturing Database Queries with Entity Framework Core
 
+Configure your DbContext to use the Hubble interceptor by adding the AddHubbleInterceptor extension method in the OnConfiguring method:
+
 ```csharp
 using Gabonet.Hubble.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -78,9 +80,105 @@ public class MyDbContext : DbContext
 }
 ```
 
-### 3. Capturing MongoDB Queries
+Alternatively, you can configure the interceptor when registering your DbContext in the service collection:
 
-Para un monitoreo completo de MongoDB, puedes implementar un contexto personalizado que automáticamente rastrea todas las consultas:
+```csharp
+// In Program.cs or Startup.cs
+services.AddDbContext<MyDbContext>((serviceProvider, optionsBuilder) =>
+{
+    var httpContextAccessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
+    optionsBuilder
+        .UseSqlServer(Configuration.GetConnectionString("DefaultConnection"))
+        .AddHubbleInterceptor(httpContextAccessor, "MyDatabase");
+});
+```
+
+### 3. Capturing Direct ADO.NET Queries
+
+There are two ways to capture ADO.NET queries that don't go through Entity Framework (like stored procedures executed directly):
+
+#### Option 1: Using GetTrackedConnection (recommended)
+
+This method is the simplest and most automatic, as any command created from the connection will be captured automatically:
+
+```csharp
+using Gabonet.Hubble.Extensions;
+using Microsoft.Data.SqlClient;
+using System.Data;
+
+public async Task<string> GetStoresProcedureById(string id)
+{
+    var response = new List<string>();
+
+    // Get a wrapped connection that automatically captures all commands
+    using (var connection = _sqlServerDbContext.GetTrackedConnection(_httpContextAccessor, "SQLServerDB"))
+    {
+        await connection.OpenAsync();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "[dbo].[SP_DBO_GETVALUESBYID]";
+            command.CommandType = CommandType.StoredProcedure;
+            command.Parameters.Add(new SqlParameter("@ID", id));
+
+            // No special action needed, commands are captured automatically
+
+            using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    response.Add(reader["Response"].ToString());
+                    break;
+                }
+            }
+        }
+    }
+
+    return response.FirstOrDefault();
+}
+```
+
+#### Option 2: Manual capture with CaptureAdoNetCommand
+
+If you prefer more control or can't modify the existing code much, you can capture the command manually just before executing it:
+
+```csharp
+using Gabonet.Hubble.Extensions;
+using Microsoft.Data.SqlClient;
+using System.Data;
+
+public async Task<string> GetStoresProcedureById(string id)
+{
+    var response = new List<string>();
+
+    using (var connection = (SqlConnection)_sqlServerDbContext.Database.GetDbConnection())
+    {
+        await connection.OpenAsync();
+        using (var command = new SqlCommand("[dbo].[SP_DBO_GETVALUESBYID]", connection))
+        {
+            command.CommandType = CommandType.StoredProcedure;
+            command.Parameters.AddWithValue("@ID", id);
+            
+            // Capture the command before executing it
+            command.CaptureAdoNetCommand(_httpContextAccessor, "SQLServerDB");
+
+            using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    response.Add(reader["Response"].ToString());
+                    break;
+                }
+            }
+        }
+    }
+
+    return conditions.FirstOrDefault();
+}
+```
+
+### 4. Capturing MongoDB Queries
+
+For comprehensive MongoDB monitoring, you can implement a custom context that automatically tracks all queries:
 
 ```csharp
 using MongoDB.Bson;
@@ -98,11 +196,11 @@ public class MongoDbContext
     private readonly ILogger<MongoDbContext> _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
-    // Tus colecciones
+    // Your collections
     public IMongoCollection<User> Users { get; private set; }
     public IMongoCollection<Account> Accounts { get; private set; }
     public IMongoCollection<Profile> Profiles { get; private set; }
-    // Otras colecciones...
+    // Other collections...
 
     public MongoDbContext(
         IConfiguration configuration, 
@@ -118,14 +216,14 @@ public class MongoDbContext
         {
             var settings = MongoClientSettings.FromConnectionString(mongoConnectionString);
 
-            // Configurar la suscripción de eventos de MongoDB para el monitoreo de Hubble
+            // Configure MongoDB event subscription for Hubble monitoring
             settings.ClusterConfigurator = cb =>
             {
                 cb.Subscribe<CommandStartedEvent>(e =>
                 {
                     _logger.LogInformation("Mongo Query: {CommandName} - {Command}", e.CommandName, e.Command.ToJson());
                     
-                    // Capturar la consulta para Hubble
+                    // Capture the query for Hubble
                     if (_httpContextAccessor.HttpContext != null)
                     {
                         var query = new DatabaseQueryLog(
@@ -146,15 +244,15 @@ public class MongoDbContext
             var client = new MongoClient(settings);
             _database = client.GetDatabase(mongoDatabaseName);
 
-            // Inicializar colecciones
+            // Initialize collections
             Users = _database.GetCollection<User>("User");
             Accounts = _database.GetCollection<Account>("Account");
             Profiles = _database.GetCollection<Profile>("Profile");
-            // Inicializar otras colecciones...
+            // Initialize other collections...
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error al inicializar el contexto de MongoDB.");
+            _logger.LogError(ex, "Error initializing MongoDB context.");
         }
     }
 
@@ -165,13 +263,13 @@ public class MongoDbContext
 }
 ```
 
-Este enfoque proporciona un monitoreo detallado de todas las operaciones de MongoDB, incluyendo:
-- Contenido de la consulta y tipo de comando
-- Nombre de la colección siendo accedida
-- Información del método llamador
-- Integración automática con el seguimiento de solicitudes HTTP de Hubble
+This approach provides detailed monitoring of all MongoDB operations, including:
+- Query content and command type
+- Name of the collection being accessed
+- Caller method information
+- Automatic integration with Hubble's HTTP request tracking
 
-### 4. Accessing the User Interface
+### 5. Accessing the User Interface
 
 Once configured, you can access the Hubble user interface by navigating to:
 
