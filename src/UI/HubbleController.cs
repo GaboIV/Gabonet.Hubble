@@ -105,7 +105,7 @@ public class HubbleController
         
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
-        html += "<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) { window.location.href='/hubble/delete-all'; }\" class='btn danger'><i class='trash-icon'>🗑️</i> Eliminar todos</button>";
+        html += "<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) { window.location.href='/hubble/delete-all'; }\" class='btn danger'>Eliminar todos</button>";
         html += "</div>";
 
         // Tabla de logs
@@ -309,7 +309,7 @@ public class HubbleController
         
         html += "<div class='card success-card'>";
         html += "<h2>Operación exitosa</h2>";
-        html += "<p>Todos los logs han sido eliminados correctamente.</p>";
+        html += "<p>Todos los logs han sido eliminados correctamente.</p><br>";
         html += "<a href='/hubble' class='btn primary'>Volver a la lista</a>";
         html += "</div>";
         
@@ -522,6 +522,31 @@ public class HubbleController
             display: inline-block;
             margin-right: 5px;
             font-style: normal;
+        }}
+        
+        .filter-icon {{
+            display: inline-block;
+            margin-right: 5px;
+            font-style: normal;
+        }}
+        
+        .eye-icon {{
+            display: inline-block;
+            margin-right: 3px;
+            font-style: normal;
+        }}
+        
+        .back-icon {{
+            display: inline-block;
+            margin-right: 5px;
+            font-style: normal;
+        }}
+        
+        .icon {{
+            display: inline-block;
+            margin-right: 5px;
+            font-style: normal;
+            vertical-align: middle;
         }}
         
         .table-actions {{
