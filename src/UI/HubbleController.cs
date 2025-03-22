@@ -30,16 +30,25 @@ public class HubbleController
     /// </summary>
     /// <param name="method">Método HTTP para filtrar</param>
     /// <param name="url">URL para filtrar</param>
+    /// <param name="statusGroup">Grupo de estado HTTP para filtrar (200, 400, 500)</param>
     /// <param name="page">Número de página</param>
     /// <param name="pageSize">Tamaño de página</param>
     /// <returns>HTML con la lista de logs</returns>
     public async Task<string> GetLogsViewAsync(
         string? method = null,
         string? url = null,
+        string? statusGroup = null,
         int page = 1,
         int pageSize = 50)
     {
         var logs = await _hubbleService.GetFilteredLogsAsync(method, url, page, pageSize);
+
+        // Filtrar por grupo de códigos de estado si se especifica
+        if (!string.IsNullOrEmpty(statusGroup))
+        {
+            int statusBase = int.Parse(statusGroup);
+            logs = logs.Where(log => log.StatusCode >= statusBase && log.StatusCode < statusBase + 100).ToList();
+        }
 
         // Generar HTML con diseño moderno
         var html = GenerateHtmlHeader("Hubble - Logs");
@@ -53,8 +62,47 @@ public class HubbleController
         // Formulario de filtro
         html += "<div class='filter-form'>";
         html += "<form method='get'>";
-        html += $"<input type='text' name='method' placeholder='Método HTTP' value='{method}' class='input-field'>";
+        
+        // Selector de método HTTP
+        html += "<div class='select-wrapper'>";
+        html += "<select name='method' class='select-field'>";
+        html += "<option value=''>Todos los métodos</option>";
+        
+        var httpMethods = new[] { "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD" };
+        foreach (var httpMethod in httpMethods)
+        {
+            var selected = method == httpMethod ? "selected" : "";
+            html += $"<option value='{httpMethod}' {selected}>{httpMethod}</option>";
+        }
+        
+        html += "</select>";
+        html += "</div>";
+        
+        // Filtro de URL
         html += $"<input type='text' name='url' placeholder='URL' value='{url}' class='input-field'>";
+        
+        // Selector de grupos de estado
+        html += "<div class='select-wrapper'>";
+        html += "<select name='statusGroup' class='select-field'>";
+        html += "<option value=''>Todos los estados</option>";
+        
+        var statusGroups = new Dictionary<string, string>
+        {
+            { "200", "2xx - Éxito" },
+            { "300", "3xx - Redirección" },
+            { "400", "4xx - Error cliente" },
+            { "500", "5xx - Error servidor" }
+        };
+        
+        foreach (var group in statusGroups)
+        {
+            var selected = statusGroup == group.Key ? "selected" : "";
+            html += $"<option value='{group.Key}' {selected}>{group.Value}</option>";
+        }
+        
+        html += "</select>";
+        html += "</div>";
+        
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
         html += "<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) { window.location.href='/hubble/delete-all'; }\" class='btn danger'><i class='trash-icon'>🗑️</i> Eliminar todos</button>";
@@ -99,14 +147,14 @@ public class HubbleController
         
         if (page > 1)
         {
-            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}' class='btn secondary'>Anterior</a>";
+            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}' class='btn secondary'>Anterior</a>";
         }
         
         html += $"<span class='page-info'>Página {page} de {totalPages}</span>";
         
         if (page < totalPages)
         {
-            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}' class='btn secondary'>Siguiente</a>";
+            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}' class='btn secondary'>Siguiente</a>";
         }
         
         html += "</div>";
@@ -398,12 +446,14 @@ public class HubbleController
             justify-content: space-between;
             align-items: center;
             gap: 15px;
+            flex-wrap: wrap;
         }}
         
         .filter-form form {{
             display: flex;
             gap: 10px;
             flex: 1;
+            flex-wrap: wrap;
         }}
         
         .input-field {{
@@ -413,6 +463,59 @@ public class HubbleController
             padding: 10px 15px;
             border-radius: 4px;
             flex-grow: 1;
+            min-width: 150px;
+        }}
+        
+        /* Solución para todos los navegadores */
+        .select-wrapper {{
+            position: relative;
+            min-width: 150px;
+            flex-grow: 1;
+        }}
+        
+        .select-field {{
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-color: var(--surface) !important;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary) !important;
+            padding: 10px 15px;
+            border-radius: 4px;
+            width: 100%;
+            cursor: pointer;
+        }}
+        
+        /* Forzar tema oscuro en todas las opciones */
+        select, option, select.select-field, option.select-option {{
+            background-color: var(--surface) !important;
+            color: var(--text-primary) !important;
+        }}
+        
+        /* Estilos globales para los select nativos */
+        select {{
+            background-color: var(--surface) !important;
+            color: var(--text-primary) !important;
+        }}
+        
+        select option {{
+            background-color: var(--surface) !important;
+            color: var(--text-primary) !important;
+            padding: 8px !important;
+        }}
+        
+        .select-wrapper::after {{
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: 15px;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid var(--text-primary);
+            pointer-events: none;
         }}
         
         .trash-icon {{
@@ -632,8 +735,47 @@ public class HubbleController
             }}
         }}
     </style>
+    <!-- Hack para forzar estilos en selects para todos los navegadores -->
+    <style id=""fix-selects"">
+        /* Esto aplicará estilos a los selects en cualquier navegador */
+        html select, html option {{
+            background-color: #1e1e1e !important;
+            color: #ffffff !important;
+        }}
+    </style>
 </head>
 <body>
+    <!-- Script para asegurar que los selects tengan tema oscuro -->
+    <script>
+        // Este script se ejecuta inmediatamente y fuerza el tema oscuro en los selects
+        document.addEventListener('DOMContentLoaded', function() {{
+            // Una función que aplica un fondo oscuro a todos los selects y opciones
+            function applyDarkStyles() {{
+                var selects = document.querySelectorAll('select');
+                for (var i = 0; i < selects.length; i++) {{
+                    selects[i].style.backgroundColor = '#1e1e1e';
+                    selects[i].style.color = '#ffffff';
+                    
+                    var options = selects[i].querySelectorAll('option');
+                    for (var j = 0; j < options.length; j++) {{
+                        options[j].style.backgroundColor = '#1e1e1e';
+                        options[j].style.color = '#ffffff';
+                    }}
+                }}
+            }}
+            
+            // Aplicar inmediatamente
+            applyDarkStyles();
+            
+            // También aplicar cuando cambie el select (algunos navegadores resetean estilos)
+            var selects = document.querySelectorAll('select');
+            for (var i = 0; i < selects.length; i++) {{
+                selects[i].addEventListener('change', applyDarkStyles);
+                selects[i].addEventListener('focus', applyDarkStyles);
+                selects[i].addEventListener('blur', applyDarkStyles);
+            }}
+        }});
+    </script>
 ";
     }
 
