@@ -48,6 +48,11 @@ public class HubbleUIMiddleware
             await HandleHubbleDetailAsync(context);
             return;
         }
+        else if (path == "/hubble/delete-all")
+        {
+            await HandleHubbleDeleteAllAsync(context);
+            return;
+        }
         else if (path.StartsWith("/hubble/api/"))
         {
             await HandleHubbleApiAsync(context);
@@ -104,6 +109,24 @@ public class HubbleUIMiddleware
             // Obtener el controlador de Hubble
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
             var html = await hubbleController.GetLogDetailAsync(id ?? "");
+
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync(html);
+        }
+        catch (Exception ex)
+        {
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"Error: {ex.Message}");
+        }
+    }
+
+    private async Task HandleHubbleDeleteAllAsync(HttpContext context)
+    {
+        try
+        {
+            // Obtener el controlador de Hubble
+            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+            var html = await hubbleController.DeleteAllLogsAsync();
 
             context.Response.ContentType = "text/html";
             await context.Response.WriteAsync(html);

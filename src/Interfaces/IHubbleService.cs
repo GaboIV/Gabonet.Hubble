@@ -56,6 +56,11 @@ public interface IHubbleService
     Task DeleteLogAsync(string id);
 
     /// <summary>
+    /// Elimina todos los logs generales.
+    /// </summary>
+    Task DeleteAllLogsAsync();
+
+    /// <summary>
     /// Registra un log general con información detallada.
     /// </summary>
     /// <param name="title">Título del log</param>

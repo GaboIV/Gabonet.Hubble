@@ -46,7 +46,7 @@ public class HubbleController
         
         html += "<div class='container'>";
         html += "<div class='header'>";
-        html += "<h1>Hubble</h1>";
+        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
         html += "<p>Hubble for .NET - Monitoreo de aplicaciones</p>";
         html += "</div>";
 
@@ -57,6 +57,7 @@ public class HubbleController
         html += $"<input type='text' name='url' placeholder='URL' value='{url}' class='input-field'>";
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
+        html += "<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) { window.location.href='/hubble/delete-all'; }\" class='btn danger'><i class='trash-icon'>🗑️</i> Eliminar todos</button>";
         html += "</div>";
 
         // Tabla de logs
@@ -133,7 +134,7 @@ public class HubbleController
         
         html += "<div class='container'>";
         html += "<div class='header'>";
-        html += "<h1>Hubble</h1>";
+        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
         html += "</div>";
 
@@ -244,6 +245,33 @@ public class HubbleController
     }
 
     /// <summary>
+    /// Elimina todos los logs y redirige a la página principal.
+    /// </summary>
+    /// <returns>HTML con mensaje de redirección</returns>
+    public async Task<string> DeleteAllLogsAsync()
+    {
+        await _hubbleService.DeleteAllLogsAsync();
+        
+        var html = GenerateHtmlHeader("Hubble - Logs eliminados");
+        
+        html += "<div class='container'>";
+        html += "<div class='header'>";
+        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
+        html += "</div>";
+        
+        html += "<div class='card success-card'>";
+        html += "<h2>Operación exitosa</h2>";
+        html += "<p>Todos los logs han sido eliminados correctamente.</p>";
+        html += "<a href='/hubble' class='btn primary'>Volver a la lista</a>";
+        html += "</div>";
+        
+        html += "</div>";
+        html += GenerateHtmlFooter();
+        
+        return html;
+    }
+
+    /// <summary>
     /// Genera una página de error.
     /// </summary>
     /// <param name="title">Título del error</param>
@@ -256,7 +284,7 @@ public class HubbleController
         
         html += "<div class='container'>";
         html += "<div class='header'>";
-        html += $"<div class='logo-container'><img src='{logoPath}' alt='Hubble Logo' class='logo'></div>";
+        html += $"<div class='logo-container'><a href='/hubble'><img src='{logoPath}' alt='Hubble Logo' class='logo'></a></div>";
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
         html += "</div>";
         
@@ -294,6 +322,7 @@ public class HubbleController
             --surface: #1e1e1e;
             --error: #cf6679;
             --success: #4caf50;
+            --danger: #f44336;
             --text-primary: #ffffff;
             --text-secondary: rgba(255, 255, 255, 0.7);
             --border-color: #333333;
@@ -340,6 +369,16 @@ public class HubbleController
             margin-bottom: 10px;
         }}
         
+        .title-link {{
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: color 0.3s;
+        }}
+        
+        .title-link:hover {{
+            color: var(--secondary-color);
+        }}
+        
         h2 {{
             color: var(--primary-light);
             margin-bottom: 15px;
@@ -356,14 +395,15 @@ public class HubbleController
             border-radius: 8px;
             margin-bottom: 20px;
             display: flex;
-            justify-content: center;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
         }}
         
         .filter-form form {{
             display: flex;
             gap: 10px;
-            width: 100%;
-            max-width: 800px;
+            flex: 1;
         }}
         
         .input-field {{
@@ -373,6 +413,18 @@ public class HubbleController
             padding: 10px 15px;
             border-radius: 4px;
             flex-grow: 1;
+        }}
+        
+        .trash-icon {{
+            display: inline-block;
+            margin-right: 5px;
+            font-style: normal;
+        }}
+        
+        .table-actions {{
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 20px;
         }}
         
         .btn {{
@@ -400,6 +452,15 @@ public class HubbleController
         
         .btn.secondary:hover {{
             background-color: rgba(187, 134, 252, 0.1);
+        }}
+        
+        .btn.danger {{
+            background-color: var(--danger);
+            color: white;
+        }}
+        
+        .btn.danger:hover {{
+            background-color: #d32f2f;
         }}
         
         .btn.small {{
@@ -474,6 +535,11 @@ public class HubbleController
         .error-card {{
             background-color: rgba(207, 102, 121, 0.1);
             border-left: 4px solid var(--error);
+        }}
+        
+        .success-card {{
+            background-color: rgba(76, 175, 80, 0.1);
+            border-left: 4px solid var(--success);
         }}
         
         .info-grid {{

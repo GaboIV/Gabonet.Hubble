@@ -124,6 +124,12 @@ public class HubbleService : IHubbleService
     }
 
     /// <inheritdoc />
+    public async Task DeleteAllLogsAsync()
+    {
+        await _logsCollection.DeleteManyAsync(_ => true);
+    }
+
+    /// <inheritdoc />
     public async Task LogAsync(
         string title,
         string logType,
