@@ -342,7 +342,7 @@ public class HubbleController
         if (relatedLogs.Count > 0)
         {
             html += "<div class='card'>";
-            html += "<h2>Logs a través de la consulta</h2>";
+            html += "<h2>Loggers</h2>";
             
             // Agrupar logs por categoría (RequestData contiene el nombre de la categoría)
             var logsByCategory = relatedLogs

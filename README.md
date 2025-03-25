@@ -81,7 +81,7 @@ public class MiControlador : Controller
 
 #### 2. Visualización de logs relacionados
 
-Cuando accedas a la página de detalles de una solicitud HTTP en `/hubble/detail/{id}`, verás una sección llamada "Logs a través de la consulta" que muestra todos los logs de ILogger relacionados con esa solicitud, agrupados por categoría (namespace del logger).
+Cuando accedas a la página de detalles de una solicitud HTTP en `/hubble/detail/{id}`, verás una sección llamada "Logger" que muestra todos los logs de ILogger relacionados con esa solicitud, agrupados por categoría (namespace del logger).
 
 ### Implementación técnica
 

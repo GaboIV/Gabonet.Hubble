@@ -194,13 +194,64 @@ public class HubbleService : IHubbleService
     {
         var httpContext = _httpContextAccessor.HttpContext;
         
+        // Extraer información de archivo, línea y método si está presente en el mensaje
+        string sourceInfo = "";
+        string cleanMessage = message;
+        
+        // Buscar diferentes patrones de información de origen en el mensaje
+        // 1. Patrón con archivo, línea y método
+        var fileLineMethodMatch = System.Text.RegularExpressions.Regex.Match(
+            message, 
+            @"\(File: ([^,]+), Line: (\d+), Method: ([^\)]+)\)$");
+            
+        // 2. Patrón solo con archivo y línea
+        var fileLineMatch = System.Text.RegularExpressions.Regex.Match(
+            message, 
+            @"\(File: ([^,]+), Line: (\d+)\)$");
+            
+        // 3. Patrón solo con método
+        var methodMatch = System.Text.RegularExpressions.Regex.Match(
+            message, 
+            @"\(File: Method: ([^\)]+)\)$");
+        
+        if (fileLineMethodMatch.Success)
+        {
+            // Extraer la información completa
+            string fileName = fileLineMethodMatch.Groups[1].Value;
+            string lineNumber = fileLineMethodMatch.Groups[2].Value;
+            string methodName = fileLineMethodMatch.Groups[3].Value;
+            sourceInfo = $"{fileName}:{lineNumber} → {methodName}";
+            
+            // Quitar esta parte del mensaje principal para que quede más limpio
+            cleanMessage = message.Substring(0, fileLineMethodMatch.Index).Trim();
+        }
+        else if (fileLineMatch.Success)
+        {
+            // Extraer la información de archivo y línea
+            string fileName = fileLineMatch.Groups[1].Value;
+            string lineNumber = fileLineMatch.Groups[2].Value;
+            sourceInfo = $"{fileName}:{lineNumber}";
+            
+            // Quitar esta parte del mensaje principal para que quede más limpio
+            cleanMessage = message.Substring(0, fileLineMatch.Index).Trim();
+        }
+        else if (methodMatch.Success)
+        {
+            // Extraer solo la información del método
+            string methodName = methodMatch.Groups[1].Value;
+            sourceInfo = methodName;
+            
+            // Quitar esta parte del mensaje principal para que quede más limpio
+            cleanMessage = message.Substring(0, methodMatch.Index).Trim();
+        }
+        
         // Si hay un contexto HTTP activo, intentamos asociar este log a la solicitud HTTP
         if (httpContext != null && httpContext.Items.ContainsKey("Hubble_RequestLog"))
         {
             // Obtenemos el ID del log de la solicitud si existe
             if (httpContext.Items["Hubble_RequestLog"] is GeneralLog requestLog)
             {
-                Console.WriteLine($"Asociando log '{message}' a la solicitud {requestLog.Id}");
+                Console.WriteLine($"Asociando log '{cleanMessage}' a la solicitud {requestLog.Id}");
                 
                 // Creamos un log de aplicación que será registrado separadamente
                 // pero con una referencia al ID de la solicitud HTTP
@@ -208,11 +259,12 @@ public class HubbleService : IHubbleService
                 {
                     ServiceName = _serviceName,
                     ControllerName = "ApplicationLogger",
-                    ActionName = logLevel.ToString(),
+                    // Incluir la información de origen junto al nivel de log si está disponible
+                    ActionName = sourceInfo.Length > 0 ? $"{logLevel} [{sourceInfo}]" : logLevel.ToString(),
                     HttpUrl = httpContext.Request.Path,
                     Method = httpContext.Request.Method,
                     RequestData = category,
-                    ResponseData = message,
+                    ResponseData = cleanMessage,
                     StatusCode = logLevel >= LogLevel.Error ? 500 : 200,
                     IsError = logLevel >= LogLevel.Error,
                     ErrorMessage = exception?.Message,
@@ -234,11 +286,12 @@ public class HubbleService : IHubbleService
         {
             ServiceName = _serviceName,
             ControllerName = "ApplicationLogger",
-            ActionName = logLevel.ToString(),
+            // Incluir la información de origen junto al nivel de log si está disponible
+            ActionName = sourceInfo.Length > 0 ? $"{logLevel} [{sourceInfo}]" : logLevel.ToString(),
             HttpUrl = httpContext?.Request.Path ?? "No URL available",
             Method = httpContext?.Request.Method ?? "No Method",
             RequestData = category,
-            ResponseData = message,
+            ResponseData = cleanMessage,
             StatusCode = logLevel >= LogLevel.Error ? 500 : 200,
             IsError = logLevel >= LogLevel.Error,
             ErrorMessage = exception?.Message,
