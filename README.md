@@ -277,6 +277,12 @@ Once configured, you can access the Hubble user interface by navigating to:
 https://your-application.com/hubble
 ```
 
+Or, if you've customized the base path:
+
+```
+https://your-application.com/your-custom-path
+```
+
 ## Configuration Options
 
 You can customize Hubble's behavior with the following options:
@@ -303,6 +309,9 @@ builder.Services.AddHubble(options =>
     
     // Optional: Enable diagnostic messages (default: false)
     options.EnableDiagnostics = false;
+    
+    // Optional: Custom base path for Hubble UI (default: "/hubble")
+    options.BasePath = "/logs";
 });
 ```
 

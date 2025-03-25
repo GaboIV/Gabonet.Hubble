@@ -177,7 +177,7 @@ public class HubbleMiddleware
         }
 
         // Ignorar rutas de Hubble
-        if (path != null && (path.StartsWith("/hubble") || path.StartsWith("/api/hubble")))
+        if (path != null && (path.StartsWith(_options.BasePath.ToLower()) || path.StartsWith("/api/hubble")))
         {
             return true;
         }
@@ -325,4 +325,9 @@ public class HubbleOptions
     /// Indica si se deben mostrar mensajes de diagnóstico en la consola.
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
+    
+    /// <summary>
+    /// Ruta base para la interfaz de usuario de Hubble.
+    /// </summary>
+    public string BasePath { get; set; } = "/hubble";
 } 

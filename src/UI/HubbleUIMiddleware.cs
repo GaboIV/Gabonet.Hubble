@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Threading.Tasks;
 using System.Linq;
+using Gabonet.Hubble.Middleware;
 
 /// <summary>
 /// Middleware para manejar las rutas de la interfaz de usuario de Hubble.
@@ -12,14 +13,17 @@ using System.Linq;
 public class HubbleUIMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly HubbleOptions _options;
 
     /// <summary>
     /// Constructor del middleware de la interfaz de usuario de Hubble.
     /// </summary>
     /// <param name="next">Siguiente middleware en la cadena</param>
-    public HubbleUIMiddleware(RequestDelegate next)
+    /// <param name="options">Opciones de configuración</param>
+    public HubbleUIMiddleware(RequestDelegate next, HubbleOptions options)
     {
         _next = next;
+        _options = options;
     }
 
     /// <summary>
@@ -37,23 +41,29 @@ public class HubbleUIMiddleware
             return;
         }
 
+        string basePath = _options.BasePath.ToLower();
+        if (!basePath.StartsWith("/"))
+        {
+            basePath = "/" + basePath;
+        }
+
         // Verificar si la ruta es para la interfaz de usuario de Hubble
-        if (path == "/hubble")
+        if (path == basePath)
         {
             await HandleHubbleHomeAsync(context);
             return;
         }
-        else if (path.StartsWith("/hubble/detail/"))
+        else if (path.StartsWith(basePath + "/detail/"))
         {
             await HandleHubbleDetailAsync(context);
             return;
         }
-        else if (path == "/hubble/delete-all")
+        else if (path == basePath + "/delete-all")
         {
             await HandleHubbleDeleteAllAsync(context);
             return;
         }
-        else if (path.StartsWith("/hubble/api/"))
+        else if (path.StartsWith(basePath + "/api/"))
         {
             await HandleHubbleApiAsync(context);
             return;

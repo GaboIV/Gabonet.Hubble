@@ -101,7 +101,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(new HubbleOptions
         {
             ServiceName = config.ServiceName,
-            EnableDiagnostics = config.EnableDiagnostics
+            EnableDiagnostics = config.EnableDiagnostics,
+            BasePath = config.BasePath
         });
 
         return services;
@@ -153,4 +154,9 @@ public class HubbleConfiguration
     /// Habilitar diagnósticos
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
+
+    /// <summary>
+    /// Ruta base para la interfaz de usuario de Hubble
+    /// </summary>
+    public string BasePath { get; set; } = "/hubble";
 } 
