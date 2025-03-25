@@ -1,6 +1,8 @@
 namespace Gabonet.Hubble.Interfaces;
 
 using Gabonet.Hubble.Models;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -33,6 +35,22 @@ public interface IHubbleService
     Task<List<GeneralLog>> GetFilteredLogsAsync(
         string? method = null, 
         string? url = null,
+        int page = 1, 
+        int pageSize = 50);
+
+    /// <summary>
+    /// Obtiene logs filtrados por método HTTP y/o URL, excluyendo logs relacionados.
+    /// </summary>
+    /// <param name="method">Método HTTP (opcional)</param>
+    /// <param name="url">URL (opcional)</param>
+    /// <param name="excludeRelatedLogs">Si es true, excluye logs de ILogger que estén relacionados con solicitudes</param>
+    /// <param name="page">Número de página</param>
+    /// <param name="pageSize">Tamaño de página</param>
+    /// <returns>Lista de logs filtrados</returns>
+    Task<List<GeneralLog>> GetFilteredLogsWithRelatedAsync(
+        string? method = null, 
+        string? url = null,
+        bool excludeRelatedLogs = true,
         int page = 1, 
         int pageSize = 50);
 
@@ -91,4 +109,20 @@ public interface IHubbleService
         string? errorDetails = null,
         long? executionTime = null
     );
+
+    /// <summary>
+    /// Registra un log proveniente del sistema ILogger.
+    /// </summary>
+    /// <param name="category">Categoría o nombre del logger</param>
+    /// <param name="logLevel">Nivel de log</param>
+    /// <param name="message">Mensaje del log</param>
+    /// <param name="exception">Excepción asociada (opcional)</param>
+    Task LogApplicationLogAsync(string category, LogLevel logLevel, string message, Exception? exception = null);
+
+    /// <summary>
+    /// Obtiene los logs relacionados con una solicitud HTTP específica.
+    /// </summary>
+    /// <param name="requestId">ID de la solicitud HTTP</param>
+    /// <returns>Lista de logs relacionados</returns>
+    Task<List<GeneralLog>> GetRelatedLogsAsync(string requestId);
 } 

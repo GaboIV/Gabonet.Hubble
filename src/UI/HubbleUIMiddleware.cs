@@ -71,6 +71,7 @@ public class HubbleUIMiddleware
             var method = context.Request.Query["method"].ToString();
             var url = context.Request.Query["url"].ToString();
             var statusGroup = context.Request.Query["statusGroup"].ToString();
+            var logType = context.Request.Query["logType"].ToString();
             var pageStr = context.Request.Query["page"].ToString();
             var pageSizeStr = context.Request.Query["pageSize"].ToString();
 
@@ -89,7 +90,7 @@ public class HubbleUIMiddleware
 
             // Obtener el controlador de Hubble
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-            var html = await hubbleController.GetLogsViewAsync(method, url, statusGroup, page, pageSize);
+            var html = await hubbleController.GetLogsViewAsync(method, url, statusGroup, logType, page, pageSize);
             
             context.Response.ContentType = "text/html";
             await context.Response.WriteAsync(html);

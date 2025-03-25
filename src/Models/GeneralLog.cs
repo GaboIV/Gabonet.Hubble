@@ -112,4 +112,10 @@ public class GeneralLog
     /// </summary>
     [BsonElement("databaseQueries")]
     public List<DatabaseQuery> DatabaseQueries { get; set; } = new List<DatabaseQuery>();
+
+    /// <summary>
+    /// ID de la solicitud HTTP relacionada (para logs de ILogger asociados a una solicitud).
+    /// </summary>
+    [BsonElement("relatedRequestId")]
+    public string? RelatedRequestId { get; set; }
 } 

@@ -1,12 +1,14 @@
 namespace Gabonet.Hubble.Extensions;
 
 using Gabonet.Hubble.Interfaces;
+using Gabonet.Hubble.Logging;
 using Gabonet.Hubble.Middleware;
 using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using System;
 
@@ -51,7 +53,9 @@ public static class ServiceCollectionExtensions
         // Registrar las opciones
         services.AddSingleton(new HubbleOptions
         {
-            ServiceName = serviceName
+            ServiceName = serviceName,
+            // Activar por defecto la captura de logs
+            CaptureLoggerMessages = true
         });
 
         return services;
@@ -95,13 +99,15 @@ public static class ServiceCollectionExtensions
         });
 
         // Registrar el controlador de Hubble
-        services.AddScoped<HubbleController>();
+        services.AddTransient<HubbleController>();
 
         // Registrar las opciones
         services.AddSingleton(new HubbleOptions
         {
             ServiceName = config.ServiceName,
-            EnableDiagnostics = config.EnableDiagnostics
+            EnableDiagnostics = config.EnableDiagnostics,
+            CaptureLoggerMessages = true, // Activar por defecto la captura de mensajes ILogger
+            CaptureHttpRequests = config.CaptureHttpRequests
         });
 
         return services;
@@ -121,6 +127,28 @@ public static class ServiceCollectionExtensions
         app.UseMiddleware<HubbleUIMiddleware>();
 
         return app;
+    }
+
+    /// <summary>
+    /// Agrega la captura de logs de ILogger a la aplicación.
+    /// </summary>
+    /// <param name="builder">Constructor de logging</param>
+    /// <param name="minimumLevel">Nivel mínimo de log a capturar</param>
+    /// <returns>Constructor de logging con Hubble configurado</returns>
+    public static ILoggingBuilder AddHubbleLogging(this ILoggingBuilder builder, LogLevel minimumLevel = LogLevel.Information)
+    {
+        // En lugar de intentar resolver IHubbleService directamente, que es un servicio scoped,
+        // creamos una factory que resuelve el servicio cuando se necesita, evitando el error
+        // "Cannot resolve scoped service from root provider"
+        builder.Services.AddSingleton<ILoggerProvider>(sp => 
+        {
+            // Crear un provider que obtendrá IHubbleService desde el scope apropiado
+            return new HubbleLoggerProvider(
+                () => sp.CreateScope().ServiceProvider.GetRequiredService<IHubbleService>(),
+                minimumLevel);
+        });
+        
+        return builder;
     }
 }
 
@@ -153,4 +181,19 @@ public class HubbleConfiguration
     /// Habilitar diagnósticos
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
+    
+    /// <summary>
+    /// Habilitar la captura de mensajes de ILogger
+    /// </summary>
+    public bool CaptureLoggerMessages { get; set; } = false;
+    
+    /// <summary>
+    /// Nivel mínimo de log a capturar
+    /// </summary>
+    public LogLevel MinimumLogLevel { get; set; } = LogLevel.Information;
+    
+    /// <summary>
+    /// Habilitar la captura de solicitudes HTTP
+    /// </summary>
+    public bool CaptureHttpRequests { get; set; } = true;
 } 

@@ -65,6 +65,7 @@ public class HubbleMiddleware
         // Capturar la solicitud
         var request = await FormatRequest(context.Request);
         var originalBodyStream = context.Response.Body;
+        GeneralLog? requestLog = null;
 
         using (var responseBody = new MemoryStream())
         {
@@ -72,6 +73,40 @@ public class HubbleMiddleware
 
             try
             {
+                // Registrar el log al principio y guardarlo en el contexto para que
+                // los loggers puedan asociarse a él
+                try 
+                {
+                    using (var scope = _serviceProvider.CreateScope())
+                    {
+                        var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
+                        
+                        // Crear un log inicial que se actualizará más tarde
+                        var initialLog = new GeneralLog
+                        {
+                            ServiceName = _options.ServiceName,
+                            HttpUrl = context.Request.Path,
+                            Method = context.Request.Method,
+                            RequestData = request,
+                            RequestHeaders = FormatHeaders(context.Request.Headers),
+                            Timestamp = DateTime.UtcNow
+                        };
+                        
+                        // Guardar el log en la base de datos para obtener su ID
+                        await hubbleService.CreateLogAsync(initialLog);
+                        
+                        // Guardar el log en el contexto HTTP
+                        context.Items["Hubble_RequestLog"] = initialLog;
+                        requestLog = initialLog;
+                        
+                        Console.WriteLine($"Log inicial creado con ID: {initialLog.Id}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error al crear log inicial: {ex.Message}");
+                }
+
                 // Ejecutar el siguiente middleware en la cadena
                 await _next(context);
 
@@ -90,17 +125,56 @@ public class HubbleMiddleware
                         stopwatch.Stop();
                         var executionTime = stopwatch.ElapsedMilliseconds;
 
-                        // Registrar el log general
-                        await LogGeneralAsync(
-                            context, 
-                            hubbleService, 
-                            request, 
-                            response, 
-                            false, 
-                            null, 
-                            null, 
-                            databaseQueries, 
-                            executionTime);
+                        // Actualizar el log con la información completa
+                        if (requestLog != null && !string.IsNullOrEmpty(requestLog.Id))
+                        {
+                            // Actualizar el log existente
+                            requestLog.ResponseData = response;
+                            requestLog.StatusCode = context.Response.StatusCode;
+                            requestLog.ExecutionTime = executionTime;
+                            requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
+                            
+                            string controllerName = "Unknown";
+                            string actionName = "Unknown";
+                            
+                            // Obtener información de controlador y acción si está disponible
+                            var routeData = context.GetRouteData();
+                            if (routeData != null)
+                            {
+                                var controllerValue = routeData.Values["controller"];
+                                var actionValue = routeData.Values["action"];
+
+                                if (controllerValue != null)
+                                {
+                                    controllerName = controllerValue.ToString() ?? "Unknown";
+                                }
+
+                                if (actionValue != null)
+                                {
+                                    actionName = actionValue.ToString() ?? "Unknown";
+                                }
+                            }
+                            
+                            requestLog.ControllerName = controllerName;
+                            requestLog.ActionName = actionName;
+                            
+                            await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
+                            Console.WriteLine($"Log actualizado: {requestLog.Id}");
+                        }
+                        else
+                        {
+                            // Si por alguna razón no existe el log inicial, crear uno nuevo
+                            await LogGeneralAsync(
+                                context, 
+                                hubbleService, 
+                                request, 
+                                response, 
+                                false, 
+                                null, 
+                                null, 
+                                databaseQueries, 
+                                executionTime);
+                        }
                     }
                 }
                 catch (Exception serviceEx)
@@ -131,16 +205,32 @@ public class HubbleMiddleware
                         var executionTime = stopwatch.ElapsedMilliseconds;
 
                         // Registrar el log de error
-                        await LogGeneralAsync(
-                            context, 
-                            hubbleService, 
-                            request, 
-                            null, 
-                            true, 
-                            ex.Message, 
-                            ex.StackTrace, 
-                            databaseQueries, 
-                            executionTime);
+                        if (requestLog != null && !string.IsNullOrEmpty(requestLog.Id))
+                        {
+                            // Actualizar el log existente con la información de error
+                            requestLog.StatusCode = context.Response.StatusCode > 0 ? context.Response.StatusCode : 500;
+                            requestLog.IsError = true;
+                            requestLog.ErrorMessage = ex.Message;
+                            requestLog.StackTrace = ex.StackTrace;
+                            requestLog.ExecutionTime = executionTime;
+                            requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
+                            
+                            await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
+                        }
+                        else
+                        {
+                            // Si no existe el log inicial, crear uno nuevo
+                            await LogGeneralAsync(
+                                context, 
+                                hubbleService, 
+                                request, 
+                                null, 
+                                true, 
+                                ex.Message, 
+                                ex.StackTrace, 
+                                databaseQueries, 
+                                executionTime);
+                        }
                     }
                 }
                 catch (Exception serviceEx)
@@ -208,8 +298,14 @@ public class HubbleMiddleware
         List<DatabaseQueryLog> databaseQueries, 
         long executionTime)
     {
-        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+        // Si no está habilitada la captura de logs HTTP, salir
+        if (!_options.CaptureHttpRequests)
+        {
+            return;
+        }
 
+        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+        
         if (ipAddress == "::1" || ipAddress == "127.0.0.1")
         {
             ipAddress = "Localhost";
@@ -219,48 +315,52 @@ public class HubbleMiddleware
             ipAddress = "IP not available";
         }
 
-        var headers = context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString());
-        var headersJson = JsonConvert.SerializeObject(headers);
+        string controllerName = "Unknown";
+        string actionName = "Unknown";
 
-        var generalLog = new GeneralLog
+        // Obtener información de controlador y acción si está disponible
+        var routeData = context.GetRouteData();
+        if (routeData != null)
         {
-            Timestamp = DateTime.UtcNow,
-            HttpUrl = context.Request.Path + context.Request.QueryString,
-            ControllerName = context.GetRouteData()?.Values["controller"]?.ToString() ?? "",
-            ActionName = context.GetRouteData()?.Values["action"]?.ToString() ?? "",
+            var controllerValue = routeData.Values["controller"];
+            var actionValue = routeData.Values["action"];
+
+            if (controllerValue != null)
+            {
+                controllerName = controllerValue.ToString() ?? "Unknown";
+            }
+
+            if (actionValue != null)
+            {
+                actionName = actionValue.ToString() ?? "Unknown";
+            }
+        }
+
+        var log = new GeneralLog
+        {
+            ServiceName = _options.ServiceName,
+            ControllerName = controllerName,
+            ActionName = actionName,
+            HttpUrl = context.Request.Path,
             Method = context.Request.Method,
-            RequestHeaders = headersJson,
             RequestData = request,
             ResponseData = response,
+            RequestHeaders = FormatHeaders(context.Request.Headers),
             StatusCode = context.Response.StatusCode,
             IsError = isError,
             ErrorMessage = errorMessage,
             StackTrace = stackTrace,
-            ServiceName = _options.ServiceName,
             IpAddress = ipAddress,
-            DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList(),
-            ExecutionTime = executionTime
+            Timestamp = DateTime.UtcNow,
+            ExecutionTime = executionTime,
+            DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList()
         };
 
-        // Verificar si hay un error en la respuesta JSON
-        if (!string.IsNullOrEmpty(response) && context.Response.ContentType?.Contains("application/json") == true)
-        {
-            try
-            {
-                var responseJson = JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
-                if (responseJson != null && responseJson.ContainsKey("success") && (bool)responseJson["success"] == false)
-                {
-                    generalLog.ErrorMessage = responseJson.ContainsKey("message") ? responseJson["message"].ToString() : "Error desconocido";
-                    generalLog.IsError = true;
-                }
-            }
-            catch (JsonReaderException)
-            {
-                // Ignorar errores al deserializar JSON
-            }
-        }
-
-        await hubbleService.CreateLogAsync(generalLog);
+        // Guardar el log en la base de datos
+        await hubbleService.CreateLogAsync(log);
+        
+        // Guardar el log en el contexto HTTP para que los logs de ILogger puedan referenciarlo
+        context.Items["Hubble_RequestLog"] = log;
     }
 
     private async Task<string> FormatRequest(HttpRequest request)
@@ -299,6 +399,12 @@ public class HubbleMiddleware
             return string.Empty;
         }
     }
+    
+    private string FormatHeaders(IHeaderDictionary headers)
+    {
+        var formattedHeaders = headers.ToDictionary(h => h.Key, h => h.Value.ToString());
+        return JsonConvert.SerializeObject(formattedHeaders);
+    }
 }
 
 /// <summary>
@@ -325,4 +431,14 @@ public class HubbleOptions
     /// Indica si se deben mostrar mensajes de diagnóstico en la consola.
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
+    
+    /// <summary>
+    /// Indica si se deben capturar los mensajes de ILogger.
+    /// </summary>
+    public bool CaptureLoggerMessages { get; set; } = false;
+
+    /// <summary>
+    /// Indica si se deben capturar las solicitudes HTTP.
+    /// </summary>
+    public bool CaptureHttpRequests { get; set; } = true;
 } 

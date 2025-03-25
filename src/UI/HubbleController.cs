@@ -31,6 +31,7 @@ public class HubbleController
     /// <param name="method">Método HTTP para filtrar</param>
     /// <param name="url">URL para filtrar</param>
     /// <param name="statusGroup">Grupo de estado HTTP para filtrar (200, 400, 500)</param>
+    /// <param name="logType">Tipo de log para filtrar (ApplicationLogger, HTTP)</param>
     /// <param name="page">Número de página</param>
     /// <param name="pageSize">Tamaño de página</param>
     /// <returns>HTML con la lista de logs</returns>
@@ -38,16 +39,33 @@ public class HubbleController
         string? method = null,
         string? url = null,
         string? statusGroup = null,
+        string? logType = null,
         int page = 1,
         int pageSize = 50)
     {
-        var logs = await _hubbleService.GetFilteredLogsAsync(method, url, page, pageSize);
+        // Por defecto, excluir logs relacionados a menos que explícitamente se soliciten logs de tipo ApplicationLogger
+        bool excludeRelatedLogs = string.IsNullOrEmpty(logType) || logType != "ApplicationLogger";
+        
+        var logs = await _hubbleService.GetFilteredLogsWithRelatedAsync(method, url, excludeRelatedLogs, page, pageSize);
 
         // Filtrar por grupo de códigos de estado si se especifica
         if (!string.IsNullOrEmpty(statusGroup))
         {
             int statusBase = int.Parse(statusGroup);
             logs = logs.Where(log => log.StatusCode >= statusBase && log.StatusCode < statusBase + 100).ToList();
+        }
+
+        // Filtrar por tipo de log si se especifica explícitamente
+        if (!string.IsNullOrEmpty(logType))
+        {
+            if (logType == "ApplicationLogger")
+            {
+                logs = logs.Where(log => log.ControllerName == "ApplicationLogger").ToList();
+            }
+            else if (logType == "HTTP")
+            {
+                logs = logs.Where(log => log.ControllerName != "ApplicationLogger").ToList();
+            }
         }
 
         // Generar HTML con diseño moderno
@@ -75,6 +93,15 @@ public class HubbleController
             html += $"<option value='{httpMethod}' {selected}>{httpMethod}</option>";
         }
         
+        html += "</select>";
+        html += "</div>";
+        
+        // Selector de tipo de log
+        html += "<div class='select-wrapper'>";
+        html += "<select name='logType' class='select-field'>";
+        html += "<option value=''>Todos los tipos</option>";
+        html += "<option value='ApplicationLogger'>Logs (ILogger)</option>";
+        html += "<option value='HTTP'>HTTP</option>";
         html += "</select>";
         html += "</div>";
         
@@ -113,11 +140,11 @@ public class HubbleController
         html += "<table class='data-table'>";
         html += "<thead><tr>";
         html += "<th>Fecha/Hora</th>";
+        html += "<th>Tipo</th>";
         html += "<th>Método</th>";
-        html += "<th>URL</th>";
+        html += "<th>URL/Categoría</th>";
         html += "<th>Estado</th>";
         html += "<th>Duración</th>";
-        html += "<th>Consultas DB</th>";
         html += "<th>Acciones</th>";
         html += "</tr></thead>";
         html += "<tbody>";
@@ -126,14 +153,38 @@ public class HubbleController
         {
             var statusClass = log.IsError || log.StatusCode >= 400 ? "error" : "success";
             var formattedTime = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+            var isILoggerEntry = log.ControllerName == "ApplicationLogger";
             
             html += $"<tr class='{statusClass}'>";
             html += $"<td>{formattedTime}</td>";
+            
+            // Mostrar tipo de log
+            if (isILoggerEntry)
+            {
+                // Para logs de ILogger, mostrar el nivel de log (ActionName contiene el nivel)
+                html += $"<td><span class='log-level {log.ActionName.ToLower()}'>{log.ActionName}</span></td>";
+            }
+            else
+            {
+                // Para logs HTTP normales
+                html += $"<td>HTTP</td>";
+            }
+            
             html += $"<td>{log.Method}</td>";
-            html += $"<td class='url-cell'>{log.HttpUrl}</td>";
+            
+            // Mostrar URL para HTTP o categoría para logs
+            if (isILoggerEntry)
+            {
+                // RequestData contiene la categoría del logger
+                html += $"<td class='url-cell'>{log.RequestData}</td>";
+            }
+            else
+            {
+                html += $"<td class='url-cell'>{log.HttpUrl}</td>";
+            }
+            
             html += $"<td>{log.StatusCode}</td>";
             html += $"<td>{log.ExecutionTime} ms</td>";
-            html += $"<td>{log.DatabaseQueries.Count}</td>";
             html += $"<td><a href='/hubble/detail/{log.Id}' class='btn small'>Ver</a></td>";
             html += "</tr>";
         }
@@ -147,14 +198,14 @@ public class HubbleController
         
         if (page > 1)
         {
-            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}' class='btn secondary'>Anterior</a>";
+            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn secondary'>Anterior</a>";
         }
         
         html += $"<span class='page-info'>Página {page} de {totalPages}</span>";
         
         if (page < totalPages)
         {
-            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}' class='btn secondary'>Siguiente</a>";
+            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn secondary'>Siguiente</a>";
         }
         
         html += "</div>";
@@ -281,6 +332,59 @@ public class HubbleController
                 }
                 
                 html += "</div>";
+            }
+            
+            html += "</div>";
+        }
+        
+        // Logs relacionados (logs de ILogger asociados a esta solicitud)
+        var relatedLogs = await _hubbleService.GetRelatedLogsAsync(log.Id);
+        if (relatedLogs.Count > 0)
+        {
+            html += "<div class='card'>";
+            html += "<h2>Loggers</h2>";
+            
+            // Agrupar logs por categoría (RequestData contiene el nombre de la categoría)
+            var logsByCategory = relatedLogs
+                .GroupBy(l => l.RequestData)
+                .OrderBy(g => g.Key)
+                .ToList();
+                
+            foreach (var categoryGroup in logsByCategory)
+            {
+                html += $"<div class='category-group'>";
+                html += $"<h3 class='category-title'>{categoryGroup.Key}</h3>";
+                
+                // Ordenar logs por timestamp dentro de cada categoría
+                var orderedLogs = categoryGroup.OrderBy(l => l.Timestamp).ToList();
+                
+                foreach (var relatedLog in orderedLogs)
+                {
+                    var logClass = relatedLog.ActionName.ToLower();
+                    html += "<div class='related-log-item'>";
+                    html += $"<div class='related-log-header'>";
+                    html += $"<span class='log-type'><span class='log-level {logClass}'>{relatedLog.ActionName}</span></span>";
+                    html += $"<span class='log-time'>{relatedLog.Timestamp.ToString("HH:mm:ss.fff")}</span>";
+                    html += "</div>";
+                    
+                    html += $"<div class='code-block log'>{relatedLog.ResponseData}</div>";
+                    
+                    if (!string.IsNullOrEmpty(relatedLog.ErrorMessage))
+                    {
+                        html += "<h4>Error</h4>";
+                        html += $"<div class='code-block error'>{relatedLog.ErrorMessage}</div>";
+                        
+                        if (!string.IsNullOrEmpty(relatedLog.StackTrace))
+                        {
+                            html += "<h4>Stack Trace</h4>";
+                            html += $"<div class='code-block'>{relatedLog.StackTrace}</div>";
+                        }
+                    }
+                    
+                    html += "</div>";
+                }
+                
+                html += "</div>"; // Cierre de category-group
             }
             
             html += "</div>";
@@ -750,6 +854,93 @@ public class HubbleController
             text-align: center;
         }}
         
+        /* Estilos para los niveles de log de ILogger */
+        .log-level {{
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }}
+        
+        .log-level.information {{
+            background-color: rgba(3, 218, 198, 0.2);
+            color: var(--secondary-color);
+        }}
+        
+        .log-level.warning {{
+            background-color: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }}
+        
+        .log-level.error, .log-level.critical {{
+            background-color: rgba(207, 102, 121, 0.2);
+            color: var(--error);
+        }}
+        
+        .log-level.debug, .log-level.trace {{
+            background-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+        }}
+        
+        /* Estilos para los logs relacionados */
+        .related-log-item {{
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }}
+        
+        .related-log-header {{
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        
+        .log-type {{
+            font-weight: bold;
+        }}
+        
+        .log-category {{
+            color: var(--text-secondary);
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        
+        .log-time {{
+            color: var(--secondary-color);
+            font-family: monospace;
+        }}
+        
+        .code-block.log {{
+            background-color: rgba(0, 0, 0, 0.3);
+            border-left: 3px solid var(--secondary-color);
+        }}
+        
+        .code-block.error {{
+            background-color: rgba(0, 0, 0, 0.3);
+            border-left: 3px solid var(--error);
+        }}
+        
+        /* Estilo para agrupar logs por categoría */
+        .category-group {{
+            margin-bottom: 25px;
+            border-left: 3px solid var(--primary-light);
+            padding-left: 15px;
+        }}
+        
+        .category-title {{
+            color: var(--primary-light);
+            font-size: 1.1em;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed var(--border-color);
+        }}
+        
         @media (max-width: 768px) {{
             .info-grid {{
                 grid-template-columns: 1fr;
@@ -757,6 +948,15 @@ public class HubbleController
             
             .filter-form form {{
                 flex-direction: column;
+            }}
+            
+            .related-log-header {{
+                flex-direction: column;
+                gap: 5px;
+            }}
+            
+            .log-category {{
+                max-width: 100%;
             }}
         }}
     </style>
