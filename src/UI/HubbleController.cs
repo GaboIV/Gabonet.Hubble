@@ -73,12 +73,19 @@ public class HubbleController
         }
 
         // Generar HTML con diseño moderno
-        var html = GenerateHtmlHeader("Hubble - Logs");
+        var html = GenerateHtmlHeader("Hubble - Logs", true);
         
         html += "<div class='container'>";
         html += "<div class='header'>";
+        html += "<div class='header-left'>";
         html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
         html += "<p>Hubble for .NET - Monitoreo de aplicaciones</p>";
+        html += "</div>";
+        
+        // Botón de logout si la autenticación está habilitada
+        html += "<div class='header-right'>";
+        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += "</div>";
         html += "</div>";
 
         // Formulario de filtro
@@ -327,12 +334,19 @@ public class HubbleController
         {
             return GenerateErrorPage("Log no encontrado", "El log solicitado no existe o ha sido eliminado.");
         }
-        var html = GenerateHtmlHeader("Hubble - Detalle del Log");
+        var html = GenerateHtmlHeader("Hubble - Detalle del Log", true);
         
         html += "<div class='container'>";
         html += "<div class='header'>";
+        html += "<div class='header-left'>";
         html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
+        html += "</div>";
+        
+        // Botón de logout si la autenticación está habilitada
+        html += "<div class='header-right'>";
+        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += "</div>";
         html += "</div>";
 
         html += "<h2 class='page-title'>Detalle del Log</h2>";
@@ -502,13 +516,20 @@ public class HubbleController
     {
         await _hubbleService.DeleteAllLogsAsync();
         
-        var html = GenerateHtmlHeader("Hubble - Logs eliminados");
+        var html = GenerateHtmlHeader("Hubble - Logs eliminados", true);
         
         html += "<div class='container'>";
         html += "<div class='header'>";
+        html += "<div class='header-left'>";
         html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
         html += "</div>";
         
+        // Botón de logout si la autenticación está habilitada
+        html += "<div class='header-right'>";
+        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += "</div>";
+        html += "</div>";
+
         html += "<div class='card success-card'>";
         html += "<h2>Operación exitosa</h2>";
         html += "<p>Todos los logs han sido eliminados correctamente.</p><br>";
@@ -530,14 +551,21 @@ public class HubbleController
     private string GenerateErrorPage(string title, string message)
     {
         var logoPath = "/img/gabonet.hubble.png";
-        var html = GenerateHtmlHeader($"Hubble - {title}");
+        var html = GenerateHtmlHeader($"Hubble - {title}", true);
         
         html += "<div class='container'>";
         html += "<div class='header'>";
+        html += "<div class='header-left'>";
         html += $"<div class='logo-container'><a href='/hubble'><img src='{logoPath}' alt='Hubble Logo' class='logo'></a></div>";
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
         html += "</div>";
         
+        // Botón de logout si la autenticación está habilitada
+        html += "<div class='header-right'>";
+        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += "</div>";
+        html += "</div>";
+
         html += $"<h2 class='page-title'>{title}</h2>";
         
         html += "<div class='card error-card'>";
@@ -554,8 +582,9 @@ public class HubbleController
     /// Genera el encabezado HTML con estilos modernos.
     /// </summary>
     /// <param name="title">Título de la página</param>
+    /// <param name="showLogout">Indica si se debe mostrar el botón de logout</param>
     /// <returns>HTML del encabezado</returns>
-    private string GenerateHtmlHeader(string title)
+    private string GenerateHtmlHeader(string title, bool showLogout = false)
     {
         return $@"<!DOCTYPE html>
 <html lang='es'>
@@ -602,6 +631,17 @@ public class HubbleController
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }}
+        
+        .header-left {{
+            display: flex;
+            align-items: center;
+        }}
+        
+        .header-right {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }}
         
         .logo-container {{

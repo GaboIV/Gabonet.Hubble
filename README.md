@@ -467,6 +467,45 @@ Once configured, you can access the Hubble user interface by navigating to:
 https://your-application.com/hubble
 ```
 
+### 7. Securing the Hubble UI with Authentication
+
+For sensitive environments, you can secure the Hubble UI with basic username and password authentication:
+
+```csharp
+builder.Services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "HubbleDB";
+    
+    // Enable authentication
+    options.RequireAuthentication = true;
+    options.Username = "admin";
+    options.Password = "your_secure_password";
+});
+```
+
+When authentication is enabled:
+- Users will be redirected to a login form when accessing Hubble
+- Session is maintained using a secure HTTP-only cookie
+- Sessions expire after 8 hours of inactivity
+- A logout option is provided in the UI
+
+For maximum security, consider:
+- Using a strong, unique password
+- Deploying your application with HTTPS enabled
+- Using environment variables for the username and password instead of hardcoding them
+
+```csharp
+// Using environment variables for credentials
+builder.Services.AddHubble(options =>
+{
+    // ... other options
+    options.RequireAuthentication = true;
+    options.Username = Environment.GetEnvironmentVariable("HUBBLE_USERNAME") ?? "admin";
+    options.Password = Environment.GetEnvironmentVariable("HUBBLE_PASSWORD") ?? "default_password";
+});
+```
+
 ## Configuration Options
 
 You can customize Hubble's behavior with the following options:
@@ -502,6 +541,15 @@ builder.Services.AddHubble(options =>
     
     // Optional: Enable capturing HTTP requests (default: true)
     options.CaptureHttpRequests = true;
+    
+    // Optional: Enable authentication for the Hubble UI (default: false)
+    options.RequireAuthentication = true;
+    
+    // Required if RequireAuthentication is true: Username for accessing the UI
+    options.Username = "admin";
+    
+    // Required if RequireAuthentication is true: Password for accessing the UI
+    options.Password = "secure_password";
 });
 ```
 

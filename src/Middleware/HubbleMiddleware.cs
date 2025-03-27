@@ -441,4 +441,19 @@ public class HubbleOptions
     /// Indica si se deben capturar las solicitudes HTTP.
     /// </summary>
     public bool CaptureHttpRequests { get; set; } = true;
+    
+    /// <summary>
+    /// Indica si se debe requerir autenticación para acceder a la interfaz de Hubble.
+    /// </summary>
+    public bool RequireAuthentication { get; set; } = false;
+    
+    /// <summary>
+    /// Nombre de usuario para la autenticación (si RequireAuthentication es true).
+    /// </summary>
+    public string Username { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Contraseña para la autenticación (si RequireAuthentication es true).
+    /// </summary>
+    public string Password { get; set; } = string.Empty;
 } 
