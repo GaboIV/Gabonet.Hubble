@@ -106,8 +106,11 @@ public static class ServiceCollectionExtensions
         {
             ServiceName = config.ServiceName,
             EnableDiagnostics = config.EnableDiagnostics,
-            CaptureLoggerMessages = true, // Activar por defecto la captura de mensajes ILogger
-            CaptureHttpRequests = config.CaptureHttpRequests
+            CaptureLoggerMessages = config.CaptureLoggerMessages,
+            CaptureHttpRequests = config.CaptureHttpRequests,
+            RequireAuthentication = config.RequireAuthentication,
+            Username = config.Username,
+            Password = config.Password
         });
 
         return services;
@@ -196,4 +199,19 @@ public class HubbleConfiguration
     /// Habilitar la captura de solicitudes HTTP
     /// </summary>
     public bool CaptureHttpRequests { get; set; } = true;
+
+    /// <summary>
+    /// Indica si se debe habilitar la protección con autenticación
+    /// </summary>
+    public bool RequireAuthentication { get; set; } = false;
+    
+    /// <summary>
+    /// Nombre de usuario para la autenticación (si RequireAuthentication es true)
+    /// </summary>
+    public string Username { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Contraseña para la autenticación (si RequireAuthentication es true)
+    /// </summary>
+    public string Password { get; set; } = string.Empty;
 } 
