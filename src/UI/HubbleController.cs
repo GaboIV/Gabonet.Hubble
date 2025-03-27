@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -15,6 +16,7 @@ using System.Threading.Tasks;
 public class HubbleController
 {
     private readonly IHubbleService _hubbleService;
+    private readonly string _version;
 
     /// <summary>
     /// Constructor del controlador de Hubble.
@@ -23,6 +25,43 @@ public class HubbleController
     public HubbleController(IHubbleService hubbleService)
     {
         _hubbleService = hubbleService;
+        _version = GetAssemblyVersion();
+    }
+    
+    /// <summary>
+    /// Obtiene la versión del ensamblado actual
+    /// </summary>
+    /// <returns>Versión del ensamblado</returns>
+    private string GetAssemblyVersion()
+    {
+        try
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var assemblyName = assembly.GetName();
+            var version = assemblyName.Version;
+            
+            if (version != null)
+            {
+                return $"v{version}";
+            }
+            
+            // Intentar obtener versión del ensamblado Gabonet.Hubble si estamos en un ensamblado diferente
+            var hubbleAssembly = Assembly.Load("Gabonet.Hubble");
+            if (hubbleAssembly != null)
+            {
+                var hubbleVersion = hubbleAssembly.GetName().Version;
+                if (hubbleVersion != null)
+                {
+                    return $"v{hubbleVersion}";
+                }
+            }
+            
+            return "v0.2.4.13"; // Versión por defecto como fallback
+        }
+        catch
+        {
+            return "v0.2.4.13"; // En caso de error, devolver versión por defecto
+        }
     }
 
     /// <summary>
@@ -79,7 +118,7 @@ public class HubbleController
         html += "<div class='header'>";
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
-        html += "<p>Hubble for .NET - Monitoreo de aplicaciones</p>";
+        html += "<p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>" + _version + "</span></p>";
         html += "</div>";
         
         // Botón de logout si la autenticación está habilitada
@@ -740,6 +779,20 @@ public class HubbleController
             margin-bottom: 10px;
         }}
         
+        /* Estilos para el título y versión de la aplicación */
+        .app-title {{
+            font-size: 1em;
+            font-weight: 500;
+            color: var(--primary-light);
+        }}
+        
+        .app-version {{
+            font-size: 0.7em;
+            color: var(--secondary-color);
+            opacity: 0.8;
+            margin-left: 5px;
+        }}
+        
         h2 {{
             color: var(--primary-light);
             margin-bottom: 15px;
@@ -1304,9 +1357,9 @@ public class HubbleController
     /// <returns>HTML del pie de página</returns>
     private string GenerateHtmlFooter()
     {
-        return @"
+        return $@"
     <footer style='text-align: center; margin-top: 40px; padding: 20px; color: var(--text-secondary);'>
-        <p>Hubble for .NET - Monitoreo de aplicaciones</p>
+        <p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>{_version}</span></p>
     </footer>
 </body>
 </html>";
