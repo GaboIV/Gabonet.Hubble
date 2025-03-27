@@ -55,7 +55,8 @@ public static class ServiceCollectionExtensions
         {
             ServiceName = serviceName,
             // Activar por defecto la captura de logs
-            CaptureLoggerMessages = true
+            CaptureLoggerMessages = true,
+            BasePath = "/hubble"
         });
 
         return services;
@@ -110,7 +111,8 @@ public static class ServiceCollectionExtensions
             CaptureHttpRequests = config.CaptureHttpRequests,
             RequireAuthentication = config.RequireAuthentication,
             Username = config.Username,
-            Password = config.Password
+            Password = config.Password,
+            BasePath = config.BasePath
         });
 
         return services;
@@ -214,4 +216,9 @@ public class HubbleConfiguration
     /// Contraseña para la autenticación (si RequireAuthentication es true)
     /// </summary>
     public string Password { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Ruta base para acceder a la interfaz de Hubble
+    /// </summary>
+    public string BasePath { get; set; } = "/hubble";
 } 

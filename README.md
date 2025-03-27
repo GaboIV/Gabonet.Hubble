@@ -30,6 +30,7 @@ builder.Services.AddHubble(options =>
     options.TimeZoneId = "Romance Standard Time";           // Opcional: Zona horaria para mostrar logs
     options.EnableDiagnostics = true;                       // Opcional: Mostrar mensajes de diagnóstico
     options.CaptureLoggerMessages = true;                   // Opcional: Capturar logs de ILogger (true por defecto)
+    options.BasePath = "/logs";                             // Opcional: Ruta personalizada para acceder a Hubble (por defecto: /hubble)
 });
 
 // Añadir el proveedor de logs de Hubble para capturar los logs de ILogger
@@ -45,10 +46,16 @@ app.UseHubble();
 
 ### Visualización de logs
 
-Para ver los logs, accede a la interfaz web integrada:
+Para ver los logs, accede a la interfaz web integrada. Por defecto, la ruta es:
 
 ```
 https://tu-aplicacion/hubble
+```
+
+Si has configurado una ruta personalizada con `options.BasePath`, deberás usar esa ruta en su lugar:
+
+```
+https://tu-aplicacion/logs  // Si configuraste options.BasePath = "/logs"
 ```
 
 ### Captura de logs de ILogger y asociación con solicitudes HTTP
@@ -541,6 +548,9 @@ builder.Services.AddHubble(options =>
     
     // Optional: Enable capturing HTTP requests (default: true)
     options.CaptureHttpRequests = true;
+    
+    // Optional: Set custom base path for the Hubble UI (default: /hubble)
+    options.BasePath = "/monitoring";
     
     // Optional: Enable authentication for the Hubble UI (default: false)
     options.RequireAuthentication = true;

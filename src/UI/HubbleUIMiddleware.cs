@@ -33,6 +33,7 @@ public class HubbleUIMiddleware
     public async Task InvokeAsync(HttpContext context, HubbleOptions options)
     {
         var path = context.Request.Path.Value?.ToLower();
+        var basePath = options.BasePath.ToLower();
 
         if (string.IsNullOrEmpty(path))
         {
@@ -41,13 +42,13 @@ public class HubbleUIMiddleware
         }
 
         // Verificar si la ruta es para la interfaz de usuario de Hubble
-        if (path.StartsWith("/hubble"))
+        if (path.StartsWith(basePath))
         {
             // Si se requiere autenticación, verificar que las credenciales sean correctas
             if (options.RequireAuthentication && !IsAuthenticated(context, options))
             {
                 // Si es una solicitud de inicio de sesión, verificar las credenciales
-                if (path == "/hubble/login" && context.Request.Method == "POST")
+                if (path == $"{basePath}/login" && context.Request.Method == "POST")
                 {
                     await HandleLoginAsync(context, options);
                     return;
@@ -59,27 +60,27 @@ public class HubbleUIMiddleware
             }
 
             // Si está autenticado o no se requiere autenticación, procesar la solicitud
-            if (path == "/hubble" || path == "/hubble/")
+            if (path == basePath || path == $"{basePath}/")
             {
                 await HandleHubbleHomeAsync(context);
                 return;
             }
-            else if (path.StartsWith("/hubble/detail/"))
+            else if (path.StartsWith($"{basePath}/detail/"))
             {
                 await HandleHubbleDetailAsync(context);
                 return;
             }
-            else if (path == "/hubble/delete-all")
+            else if (path == $"{basePath}/delete-all")
             {
                 await HandleHubbleDeleteAllAsync(context);
                 return;
             }
-            else if (path.StartsWith("/hubble/api/"))
+            else if (path.StartsWith($"{basePath}/api/"))
             {
                 await HandleHubbleApiAsync(context);
                 return;
             }
-            else if (path == "/hubble/logout" && options.RequireAuthentication)
+            else if (path == $"{basePath}/logout" && options.RequireAuthentication)
             {
                 await HandleLogoutAsync(context);
                 return;
@@ -176,6 +177,8 @@ public class HubbleUIMiddleware
 
     private async Task HandleLoginAsync(HttpContext context, HubbleOptions options)
     {
+        var basePath = options.BasePath.ToLower();
+        
         // Leer el cuerpo de la solicitud para obtener las credenciales
         context.Request.EnableBuffering();
         using var reader = new System.IO.StreamReader(context.Request.Body, Encoding.UTF8, true, 1024, true);
@@ -196,11 +199,11 @@ public class HubbleUIMiddleware
                 Secure = context.Request.IsHttps,
                 SameSite = SameSiteMode.Lax,
                 Expires = DateTimeOffset.Now.AddHours(8), // La cookie expira después de 8 horas
-                Path = "/hubble" // Solo válida para las rutas de Hubble
+                Path = basePath // Solo válida para las rutas de Hubble
             });
 
             // Redirigir al usuario a la página principal de Hubble
-            context.Response.Redirect("/hubble");
+            context.Response.Redirect(basePath);
         }
         else
         {
@@ -211,18 +214,24 @@ public class HubbleUIMiddleware
 
     private async Task HandleLogoutAsync(HttpContext context)
     {
+        var options = context.RequestServices.GetRequiredService<HubbleOptions>();
+        var basePath = options.BasePath.ToLower();
+        
         // Eliminar la cookie de autenticación
         context.Response.Cookies.Delete("HubbleAuth", new CookieOptions
         {
-            Path = "/hubble"
+            Path = basePath
         });
 
         // Redirigir al formulario de inicio de sesión
-        context.Response.Redirect("/hubble");
+        context.Response.Redirect(basePath);
     }
 
     private async Task ShowLoginFormAsync(HttpContext context, bool showError = false)
     {
+        var options = context.RequestServices.GetRequiredService<HubbleOptions>();
+        var basePath = options.BasePath.ToLower();
+        
         var html = $@"
 <!DOCTYPE html>
 <html lang='es'>
@@ -250,33 +259,39 @@ public class HubbleUIMiddleware
         }}
         
         body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--background);
             color: var(--text-primary);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
             height: 100vh;
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
         }}
         
         .login-container {{
             background-color: var(--surface);
             border-radius: 8px;
-            padding: 30px;
-            width: 100%;
-            max-width: 400px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            width: 90%;
+            max-width: 400px;
         }}
         
         .login-header {{
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 2rem;
         }}
         
-        .login-header h1 {{
+        .login-title {{
             color: var(--primary-light);
-            margin-bottom: 10px;
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }}
+        
+        .login-subtitle {{
+            color: var(--text-secondary);
+            font-size: 1rem;
         }}
         
         .login-form {{
@@ -285,76 +300,80 @@ public class HubbleUIMiddleware
         }}
         
         .form-group {{
-            margin-bottom: 20px;
+            margin-bottom: 1.5rem;
         }}
         
-        .form-group label {{
+        label {{
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 0.5rem;
             color: var(--text-secondary);
         }}
         
-        .form-group input {{
+        input {{
             width: 100%;
-            padding: 10px 15px;
+            padding: 0.75rem;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             background-color: rgba(255, 255, 255, 0.1);
             color: var(--text-primary);
-            font-size: 16px;
+            font-size: 1rem;
         }}
         
-        .form-group input:focus {{
+        input:focus {{
             outline: none;
             border-color: var(--primary-light);
+            box-shadow: 0 0 0 2px rgba(187, 134, 252, 0.25);
         }}
         
-        .btn {{
+        button {{
+            display: inline-block;
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 4px;
             background-color: var(--primary-color);
             color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 4px;
+            font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background-color 0.3s;
-            font-size: 16px;
+            transition: background-color 0.2s;
         }}
         
-        .btn:hover {{
+        button:hover {{
             background-color: var(--primary-light);
         }}
         
         .error-message {{
+            background-color: rgba(207, 102, 121, 0.1);
+            border-left: 4px solid var(--error);
             color: var(--error);
-            margin-bottom: 20px;
-            text-align: center;
-            display: {(showError ? "block" : "none")};
+            padding: 0.75rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0 4px 4px 0;
         }}
     </style>
 </head>
 <body>
     <div class='login-container'>
         <div class='login-header'>
-            <h1>Hubble</h1>
-            <p>Iniciar sesión para acceder al panel</p>
+            <h1 class='login-title'>Hubble</h1>
+            <p class='login-subtitle'>Inicia sesión para continuar</p>
         </div>
         
-        <div class='error-message'>Nombre de usuario o contraseña incorrectos</div>
+        {(showError ? @"<div class='error-message'>Nombre de usuario o contraseña incorrectos</div>" : "")}
         
-        <form class='login-form' method='post' action='/hubble/login'>
+        <form class='login-form' method='post' action='{basePath}/login'>
             <div class='form-group'>
                 <label for='username'>Nombre de usuario</label>
-                <input type='text' id='username' name='username' required autofocus>
+                <input type='text' id='username' name='username' required autofocus />
             </div>
             
             <div class='form-group'>
                 <label for='password'>Contraseña</label>
-                <input type='password' id='password' name='password' required>
+                <input type='password' id='password' name='password' required />
             </div>
             
-            <button type='submit' class='btn'>Iniciar sesión</button>
+            <button type='submit'>Iniciar sesión</button>
         </form>
     </div>
 </body>

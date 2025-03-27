@@ -17,15 +17,18 @@ public class HubbleController
 {
     private readonly IHubbleService _hubbleService;
     private readonly string _version;
+    private readonly string _basePath;
 
     /// <summary>
     /// Constructor del controlador de Hubble.
     /// </summary>
     /// <param name="hubbleService">Servicio de Hubble</param>
-    public HubbleController(IHubbleService hubbleService)
+    /// <param name="options">Opciones de configuración de Hubble</param>
+    public HubbleController(IHubbleService hubbleService, Middleware.HubbleOptions options)
     {
         _hubbleService = hubbleService;
         _version = GetAssemblyVersion();
+        _basePath = options.BasePath.TrimEnd('/');
     }
     
     /// <summary>
@@ -123,7 +126,7 @@ public class HubbleController
         
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -182,7 +185,7 @@ public class HubbleController
         
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
-        html += "<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) { window.location.href='/hubble/delete-all'; }\" class='btn danger'>Eliminar todos</button>";
+        html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
         html += "</div>";
 
         // Tabla de logs
@@ -235,7 +238,7 @@ public class HubbleController
             
             html += $"<td>{log.StatusCode}</td>";
             html += $"<td>{log.ExecutionTime} ms</td>";
-            html += $"<td><a href='/hubble/detail/{log.Id}' class='btn small'>Ver</a></td>";
+            html += $"<td><a href='{_basePath}/detail/{log.Id}' class='btn small'>Ver</a></td>";
             html += "</tr>";
         }
 
@@ -379,12 +382,14 @@ public class HubbleController
         html += "<div class='header'>";
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
-        html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
+        html += "<div class='action-buttons'>";
+        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += "</div>";
         html += "</div>";
         
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -565,14 +570,14 @@ public class HubbleController
         
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
         html += "<div class='card success-card'>";
         html += "<h2>Operación exitosa</h2>";
         html += "<p>Todos los logs han sido eliminados correctamente.</p><br>";
-        html += "<a href='/hubble' class='btn primary'>Volver a la lista</a>";
+        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
         html += "</div>";
         
         html += "</div>";
@@ -595,12 +600,14 @@ public class HubbleController
         html += "<div class='header'>";
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
-        html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
+        html += "<div class='action-buttons'>";
+        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += "</div>";
         html += "</div>";
         
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += "<a href='/hubble/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -622,8 +629,8 @@ public class HubbleController
     /// <returns>HTML con el logo SVG</returns>
     private string GetHubbleLogo()
     {
-        return @"<div class='logo-container'>
-            <a href='/hubble' title='Recargar Hubble Dashboard' class='logo-link'>
+        return $@"<div class='logo-container'>
+            <a href='{_basePath}' title='Recargar Hubble Dashboard' class='logo-link'>
                 <svg width='200' height='60' viewBox='0 0 200 60' fill='none' xmlns='http://www.w3.org/2000/svg' class='hubble-logo'>
                     <!-- Fondo circular principal -->
                     <circle cx='30' cy='30' r='28' fill='#121212' stroke='#6200EE' stroke-width='3'></circle>

@@ -267,7 +267,7 @@ public class HubbleMiddleware
         }
 
         // Ignorar rutas de Hubble
-        if (path != null && (path.StartsWith("/hubble") || path.StartsWith("/api/hubble")))
+        if (path != null && (path.StartsWith(_options.BasePath.ToLower()) || path.StartsWith("/api/hubble")))
         {
             return true;
         }
@@ -456,4 +456,9 @@ public class HubbleOptions
     /// Contraseña para la autenticación (si RequireAuthentication es true).
     /// </summary>
     public string Password { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
+    /// </summary>
+    public string BasePath { get; set; } = "/hubble";
 } 
