@@ -585,45 +585,39 @@ public class HubbleController
     {
         return @"<div class='logo-container'>
             <a href='/hubble' title='Recargar Hubble Dashboard' class='logo-link'>
-                <svg width='120' height='40' viewBox='0 0 120 40' fill='none' xmlns='http://www.w3.org/2000/svg' class='hubble-logo'>
+                <svg width='200' height='60' viewBox='0 0 200 60' fill='none' xmlns='http://www.w3.org/2000/svg' class='hubble-logo'>
                     <!-- Fondo circular principal -->
-                    <circle cx='20' cy='20' r='18' fill='#121212' stroke='#6200EE' stroke-width='2'/>
+                    <circle cx='30' cy='30' r='28' fill='#121212' stroke='#6200EE' stroke-width='3'></circle>
                     
                     <!-- Anillos del telescopio -->
-                    <circle cx='20' cy='20' r='14' fill='none' stroke='#03DAC6' stroke-width='1' stroke-dasharray='2 2'/>
-                    <circle cx='20' cy='20' r='10' fill='none' stroke='rgba(187, 134, 252, 0.4)' stroke-width='1'/>
+                    <circle cx='30' cy='30' r='22' fill='none' stroke='#03DAC6' stroke-width='2' stroke-dasharray='3 3'></circle>
+                    <circle cx='30' cy='30' r='16' fill='none' stroke='rgba(187, 134, 252, 0.4)' stroke-width='2'></circle>
                     
-                    <!-- Estrellas en diferentes tamaños y colores -->
-                    <circle cx='14' cy='16' r='2' fill='#BB86FC'>
-                        <animate attributeName='opacity' values='0.7;1;0.7' dur='3s' repeatCount='indefinite'/>
+                    <!-- Estrellas -->
+                    <circle cx='20' cy='22' r='3' fill='#BB86FC'>
+                        <animate attributeName='opacity' values='0.7;1;0.7' dur='3s' repeatCount='indefinite'></animate>
                     </circle>
-                    <circle cx='28' cy='22' r='3' fill='#03DAC6'>
-                        <animate attributeName='opacity' values='0.8;1;0.8' dur='2.5s' repeatCount='indefinite'/>
+                    <circle cx='40' cy='32' r='4' fill='#03DAC6'>
+                        <animate attributeName='opacity' values='0.8;1;0.8' dur='2.5s' repeatCount='indefinite'></animate>
                     </circle>
-                    <circle cx='20' cy='12' r='1.5' fill='#FFFFFF'>
-                        <animate attributeName='opacity' values='0.6;1;0.6' dur='2s' repeatCount='indefinite'/>
+                    <circle cx='30' cy='16' r='2' fill='#FFFFFF'>
+                        <animate attributeName='opacity' values='0.6;1;0.6' dur='2s' repeatCount='indefinite'></animate>
                     </circle>
-                    <circle cx='24' cy='28' r='1' fill='#BB86FC'>
-                        <animate attributeName='opacity' values='0.7;1;0.7' dur='2.7s' repeatCount='indefinite'/>
+                    <circle cx='35' cy='42' r='1.5' fill='#BB86FC'>
+                        <animate attributeName='opacity' values='0.7;1;0.7' dur='2.7s' repeatCount='indefinite'></animate>
                     </circle>
-                    <circle cx='10' cy='24' r='1.2' fill='#FFFFFF'>
-                        <animate attributeName='opacity' values='0.6;0.9;0.6' dur='3.2s' repeatCount='indefinite'/>
+                    <circle cx='15' cy='38' r='1.8' fill='#FFFFFF'>
+                        <animate attributeName='opacity' values='0.6;0.9;0.6' dur='3.2s' repeatCount='indefinite'></animate>
                     </circle>
                     
-                    <!-- Texto HUBBLE -->
-                    <path d='M47 15V25H45V15H47Z' fill='#FFFFFF'/>
-                    <path d='M59 15V25H57V21H53V25H51V15H53V19H57V15H59Z' fill='#FFFFFF'/>
-                    <path d='M70 17H66V19H69V21H66V23H70V25H64V15H70V17Z' fill='#FFFFFF'/>
-                    <path d='M80 17H76V19H79V21H76V23H80V25H74V15H80V17Z' fill='#FFFFFF'/>
-                    <path d='M90 17H87V25H85V17H82V15H90V17Z' fill='#FFFFFF'/>
+                    <!-- Texto HUBBLE más grande -->
+                    <text x='70' y='40' font-family='Segoe UI, sans-serif' font-size='28' fill='white' font-weight='bold'>HUBBLE</text>
                     
-                    <!-- Línea decorativa que simula la órbita -->
-                    <path d='M97 20C97 14.5 101 11 106 11' stroke='#03DAC6' stroke-width='1' stroke-dasharray='1 1'/>
+                    <!-- Línea decorativa -->
+                    <path d='M130 30C130 22 140 18 150 18' stroke='#03DAC6' stroke-width='2' stroke-dasharray='2 2'></path>
                     
-                    <!-- Texto 'by Gabonet' con resplandor sutil para legibilidad -->
-                    <g class='creator-text'>
-                        <text x='64' y='32' font-family='Segoe UI, sans-serif' font-size='7' fill='#03DAC6' font-weight='500'>by Gabonet</text>
-                    </g>
+                    <!-- Texto 'by Gabonet' -->
+                    <text x='100' y='55' font-family='Segoe UI, sans-serif' font-size='10' fill='#03DAC6' font-weight='500'>by Gabonet</text>
                 </svg>
             </a>
         </div>";
