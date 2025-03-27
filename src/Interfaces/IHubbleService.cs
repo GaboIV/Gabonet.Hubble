@@ -125,4 +125,16 @@ public interface IHubbleService
     /// <param name="requestId">ID de la solicitud HTTP</param>
     /// <returns>Lista de logs relacionados</returns>
     Task<List<GeneralLog>> GetRelatedLogsAsync(string requestId);
+
+    /// <summary>
+    /// Obtiene el conteo total de logs basado en los filtros aplicados.
+    /// </summary>
+    /// <param name="method">Método HTTP (opcional)</param>
+    /// <param name="url">URL (opcional)</param>
+    /// <param name="excludeRelatedLogs">Si es true, excluye logs de ILogger que estén relacionados con solicitudes</param>
+    /// <returns>Número total de logs que coinciden con los filtros</returns>
+    Task<long> GetTotalLogsCountAsync(
+        string? method = null,
+        string? url = null,
+        bool excludeRelatedLogs = true);
 } 

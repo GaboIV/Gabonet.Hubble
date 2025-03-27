@@ -118,4 +118,10 @@ public class GeneralLog
     /// </summary>
     [BsonElement("relatedRequestId")]
     public string? RelatedRequestId { get; set; }
+
+    /// <summary>
+    /// Captura cualquier elemento adicional que no esté definido en la clase
+    /// </summary>
+    [BsonExtraElements]
+    public BsonDocument? ExtraElements { get; set; }
 } 

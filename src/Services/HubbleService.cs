@@ -325,6 +325,50 @@ public class HubbleService : IHubbleService
     }
 
     /// <inheritdoc />
+    public async Task<long> GetTotalLogsCountAsync(
+        string? method = null,
+        string? url = null,
+        bool excludeRelatedLogs = true)
+    {
+        var filterBuilder = Builders<GeneralLog>.Filter;
+        var filter = filterBuilder.Empty;
+
+        // Filtrar por método si se proporciona
+        if (!string.IsNullOrEmpty(method))
+        {
+            filter &= filterBuilder.Eq(log => log.Method, method);
+        }
+
+        // Filtrar por URL si se proporciona
+        if (!string.IsNullOrEmpty(url))
+        {
+            var words = url.Split(' ');
+            foreach (var word in words)
+            {
+                if (!string.IsNullOrWhiteSpace(word))
+                {
+                    filter &= filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
+                }
+            }
+        }
+
+        // Si se deben excluir logs relacionados, añadir filtro para excluir ApplicationLogger
+        // logs que tengan RelatedRequestId (significa que son logs generados por ILogger
+        // y relacionados con una solicitud HTTP)
+        if (excludeRelatedLogs)
+        {
+            var appLoggerFilter = filterBuilder.Eq(log => log.ControllerName, "ApplicationLogger");
+            var hasRelatedRequestId = filterBuilder.Exists(log => log.RelatedRequestId, true);
+            
+            // Excluir los logs que son de ApplicationLogger Y tienen RelatedRequestId
+            filter &= filterBuilder.Not(filterBuilder.And(appLoggerFilter, hasRelatedRequestId));
+        }
+
+        // Devolver el conteo total de logs que cumplen los criterios
+        return await _logsCollection.CountDocumentsAsync(filter);
+    }
+
+    /// <inheritdoc />
     public async Task<List<GeneralLog>> GetFilteredLogsWithRelatedAsync(
         string? method = null, 
         string? url = null,

@@ -46,6 +46,10 @@ public class HubbleController
         // Por defecto, excluir logs relacionados a menos que explícitamente se soliciten logs de tipo ApplicationLogger
         bool excludeRelatedLogs = string.IsNullOrEmpty(logType) || logType != "ApplicationLogger";
         
+        // Obtener el conteo total de logs antes de aplicar la paginación
+        var totalCount = await _hubbleService.GetTotalLogsCountAsync(method, url, excludeRelatedLogs);
+        
+        // Obtener los logs para la página actual
         var logs = await _hubbleService.GetFilteredLogsWithRelatedAsync(method, url, excludeRelatedLogs, page, pageSize);
 
         // Filtrar por grupo de códigos de estado si se especifica
@@ -193,19 +197,113 @@ public class HubbleController
         html += "</div>";
 
         // Paginación
-        var totalPages = Math.Max(1, (int)Math.Ceiling((double)logs.Count / pageSize));
+        var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+        
+        // Mostrar información de total de elementos y paginación
+        html += "<div class='pagination-info'>";
+        html += $"<span>Mostrando {logs.Count} de {totalCount} registros</span>";
+        html += $"<span>Página {page} de {totalPages}</span>";
+        html += "</div>";
+        
         html += "<div class='pagination'>";
         
+        // Botón de primera página
         if (page > 1)
         {
-            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn secondary'>Anterior</a>";
+            html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Primera página'><span class='pagination-icon'>«</span></a>";
+        }
+        else
+        {
+            html += $"<span class='btn pagination-btn disabled' title='Primera página'><span class='pagination-icon'>«</span></span>";
         }
         
-        html += $"<span class='page-info'>Página {page} de {totalPages}</span>";
+        // Botón página anterior
+        if (page > 1)
+        {
+            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Página anterior'><span class='pagination-icon'>‹</span></a>";
+        }
+        else
+        {
+            html += $"<span class='btn pagination-btn disabled' title='Página anterior'><span class='pagination-icon'>‹</span></span>";
+        }
         
+        // Información de página con navegador de páginas
+        html += "<div class='page-navigator'>";
+        
+        // Lógica mejorada para mostrar las páginas
+        int pagesToShow = 5;
+        int halfPagesToShow = pagesToShow / 2;
+        
+        int startPage = Math.Max(1, page - halfPagesToShow);
+        int endPage = Math.Min(totalPages, startPage + pagesToShow - 1);
+        
+        // Ajustar startPage si estamos cerca del final
+        if (endPage == totalPages)
+        {
+            startPage = Math.Max(1, endPage - pagesToShow + 1);
+        }
+        
+        // Mostrar elipsis al inicio si es necesario
+        if (startPage > 1)
+        {
+            if (startPage > 2)
+            {
+                html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>1</a>";
+                html += "<span class='page-ellipsis'>...</span>";
+            }
+            else if (startPage == 2)
+            {
+                html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>1</a>";
+            }
+        }
+        
+        // Mostrar páginas numeradas
+        for (int i = startPage; i <= endPage; i++)
+        {
+            if (i == page)
+            {
+                html += $"<span class='page-number current'>{i}</span>";
+            }
+            else
+            {
+                html += $"<a href='?page={i}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{i}</a>";
+            }
+        }
+        
+        // Mostrar elipsis al final si es necesario
+        if (endPage < totalPages)
+        {
+            if (endPage < totalPages - 1)
+            {
+                html += "<span class='page-ellipsis'>...</span>";
+                html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{totalPages}</a>";
+            }
+            else if (endPage == totalPages - 1)
+            {
+                html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{totalPages}</a>";
+            }
+        }
+        
+        html += "</div>";
+        
+        // Botón página siguiente
         if (page < totalPages)
         {
-            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn secondary'>Siguiente</a>";
+            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Página siguiente'><span class='pagination-icon'>›</span></a>";
+        }
+        else
+        {
+            html += $"<span class='btn pagination-btn disabled' title='Página siguiente'><span class='pagination-icon'>›</span></span>";
+        }
+        
+        // Botón de última página
+        if (page < totalPages)
+        {
+            html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Última página'><span class='pagination-icon'>»</span></a>";
+        }
+        else
+        {
+            html += $"<span class='btn pagination-btn disabled' title='Última página'><span class='pagination-icon'>»</span></span>";
         }
         
         html += "</div>";
@@ -753,8 +851,83 @@ public class HubbleController
             margin-top: 20px;
         }}
         
+        .pagination-info {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--surface);
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }}
+        
         .page-info {{
             color: var(--text-secondary);
+        }}
+        
+        .pagination-btn {{
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            min-width: 40px;
+            height: 40px;
+            padding: 0 10px;
+            border-radius: 4px;
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }}
+        
+        .pagination-btn:hover {{
+            background-color: rgba(255, 255, 255, 0.1);
+        }}
+        
+        .pagination-btn.disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }}
+        
+        .pagination-icon {{
+            font-size: 1.5em;
+            line-height: 1;
+        }}
+        
+        .page-navigator {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        
+        .page-number {{
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            min-width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            text-decoration: none;
+            color: var(--text-primary);
+            background-color: rgba(255, 255, 255, 0.05);
+            transition: all 0.2s ease;
+        }}
+        
+        .page-number:hover {{
+            background-color: rgba(255, 255, 255, 0.1);
+        }}
+        
+        .page-number.current {{
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: bold;
+        }}
+        
+        .page-ellipsis {{
+            color: var(--text-secondary);
+            padding: 0 5px;
         }}
         
         .card {{

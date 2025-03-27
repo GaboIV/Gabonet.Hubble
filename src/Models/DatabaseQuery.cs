@@ -1,5 +1,6 @@
 namespace Gabonet.Hubble.Models;
 
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using System;
 
@@ -85,4 +86,10 @@ public class DatabaseQuery
     /// </summary>
     [BsonElement("additionalInfo")]
     public string? AdditionalInfo { get; set; }
+
+    /// <summary>
+    /// Captura cualquier elemento adicional que no esté definido en la clase
+    /// </summary>
+    [BsonExtraElements]
+    public BsonDocument? ExtraElements { get; set; }
 } 

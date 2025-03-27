@@ -2,6 +2,8 @@ namespace Gabonet.Hubble.Models;
 
 using System;
 using System.Diagnostics;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
 using Newtonsoft.Json;
 
 /// <summary>
@@ -117,4 +119,11 @@ public class DatabaseQueryLog
             AdditionalInfo = additionalInfo
         };
     }
+
+    
+    /// <summary>
+    /// Captura cualquier elemento adicional que no esté definido en la clase
+    /// </summary>
+    [BsonExtraElements]
+    public BsonDocument? ExtraElements { get; set; }
 } 
