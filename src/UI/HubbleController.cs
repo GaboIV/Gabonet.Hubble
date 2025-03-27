@@ -78,7 +78,7 @@ public class HubbleController
         html += "<div class='container'>";
         html += "<div class='header'>";
         html += "<div class='header-left'>";
-        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
+        html += GetHubbleLogo();
         html += "<p>Hubble for .NET - Monitoreo de aplicaciones</p>";
         html += "</div>";
         
@@ -339,7 +339,7 @@ public class HubbleController
         html += "<div class='container'>";
         html += "<div class='header'>";
         html += "<div class='header-left'>";
-        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
+        html += GetHubbleLogo();
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
         html += "</div>";
         
@@ -521,7 +521,7 @@ public class HubbleController
         html += "<div class='container'>";
         html += "<div class='header'>";
         html += "<div class='header-left'>";
-        html += "<h1><a href='/hubble' class='title-link'>Hubble</a></h1>";
+        html += GetHubbleLogo();
         html += "</div>";
         
         // Botón de logout si la autenticación está habilitada
@@ -550,13 +550,12 @@ public class HubbleController
     /// <returns>HTML con la página de error</returns>
     private string GenerateErrorPage(string title, string message)
     {
-        var logoPath = "/img/gabonet.hubble.png";
         var html = GenerateHtmlHeader($"Hubble - {title}", true);
         
         html += "<div class='container'>";
         html += "<div class='header'>";
         html += "<div class='header-left'>";
-        html += $"<div class='logo-container'><a href='/hubble'><img src='{logoPath}' alt='Hubble Logo' class='logo'></a></div>";
+        html += GetHubbleLogo();
         html += "<a href='/hubble' class='btn secondary'>Volver a la lista</a>";
         html += "</div>";
         
@@ -576,6 +575,58 @@ public class HubbleController
         html += GenerateHtmlFooter();
         
         return html;
+    }
+
+    /// <summary>
+    /// Genera el logo de Hubble en formato SVG.
+    /// </summary>
+    /// <returns>HTML con el logo SVG</returns>
+    private string GetHubbleLogo()
+    {
+        return @"<div class='logo-container'>
+            <a href='/hubble' title='Recargar Hubble Dashboard' class='logo-link'>
+                <svg width='120' height='40' viewBox='0 0 120 40' fill='none' xmlns='http://www.w3.org/2000/svg' class='hubble-logo'>
+                    <!-- Fondo circular principal -->
+                    <circle cx='20' cy='20' r='18' fill='#121212' stroke='#6200EE' stroke-width='2'/>
+                    
+                    <!-- Anillos del telescopio -->
+                    <circle cx='20' cy='20' r='14' fill='none' stroke='#03DAC6' stroke-width='1' stroke-dasharray='2 2'/>
+                    <circle cx='20' cy='20' r='10' fill='none' stroke='rgba(187, 134, 252, 0.4)' stroke-width='1'/>
+                    
+                    <!-- Estrellas en diferentes tamaños y colores -->
+                    <circle cx='14' cy='16' r='2' fill='#BB86FC'>
+                        <animate attributeName='opacity' values='0.7;1;0.7' dur='3s' repeatCount='indefinite'/>
+                    </circle>
+                    <circle cx='28' cy='22' r='3' fill='#03DAC6'>
+                        <animate attributeName='opacity' values='0.8;1;0.8' dur='2.5s' repeatCount='indefinite'/>
+                    </circle>
+                    <circle cx='20' cy='12' r='1.5' fill='#FFFFFF'>
+                        <animate attributeName='opacity' values='0.6;1;0.6' dur='2s' repeatCount='indefinite'/>
+                    </circle>
+                    <circle cx='24' cy='28' r='1' fill='#BB86FC'>
+                        <animate attributeName='opacity' values='0.7;1;0.7' dur='2.7s' repeatCount='indefinite'/>
+                    </circle>
+                    <circle cx='10' cy='24' r='1.2' fill='#FFFFFF'>
+                        <animate attributeName='opacity' values='0.6;0.9;0.6' dur='3.2s' repeatCount='indefinite'/>
+                    </circle>
+                    
+                    <!-- Texto HUBBLE -->
+                    <path d='M47 15V25H45V15H47Z' fill='#FFFFFF'/>
+                    <path d='M59 15V25H57V21H53V25H51V15H53V19H57V15H59Z' fill='#FFFFFF'/>
+                    <path d='M70 17H66V19H69V21H66V23H70V25H64V15H70V17Z' fill='#FFFFFF'/>
+                    <path d='M80 17H76V19H79V21H76V23H80V25H74V15H80V17Z' fill='#FFFFFF'/>
+                    <path d='M90 17H87V25H85V17H82V15H90V17Z' fill='#FFFFFF'/>
+                    
+                    <!-- Línea decorativa que simula la órbita -->
+                    <path d='M97 20C97 14.5 101 11 106 11' stroke='#03DAC6' stroke-width='1' stroke-dasharray='1 1'/>
+                    
+                    <!-- Texto 'by Gabonet' con resplandor sutil para legibilidad -->
+                    <g class='creator-text'>
+                        <text x='64' y='32' font-family='Segoe UI, sans-serif' font-size='7' fill='#03DAC6' font-weight='500'>by Gabonet</text>
+                    </g>
+                </svg>
+            </a>
+        </div>";
     }
 
     /// <summary>
@@ -647,26 +698,52 @@ public class HubbleController
         .logo-container {{
             display: flex;
             align-items: center;
+            margin-right: 15px;
         }}
         
-        .logo {{
-            max-height: 60px;
-            max-width: 100%;
+        .logo-link {{
+            display: block;
+            transition: transform 0.3s ease;
+        }}
+        
+        .logo-link:hover {{
+            transform: scale(1.05);
+        }}
+        
+        .hubble-logo {{
+            max-height: 40px;
+            max-width: 120px;
+        }}
+        
+        /* Estilos especiales para las estrellas del logo */
+        .hubble-logo circle {{
+            transition: fill 0.3s ease, r 0.3s ease;
+        }}
+        
+        .logo-link:hover .hubble-logo circle[fill='#BB86FC'],
+        .logo-link:hover .hubble-logo circle[fill='#03DAC6'],
+        .logo-link:hover .hubble-logo circle[fill='#FFFFFF'] {{
+            filter: brightness(1.2);
+        }}
+        
+        .logo-link:hover .hubble-logo text {{
+            fill: var(--primary-light);
+            transition: fill 0.3s ease;
+        }}
+        
+        /* Estilos para el texto del creador */
+        .creator-text {{
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }}
+        
+        .logo-link:hover .creator-text {{
+            opacity: 1;
         }}
         
         h1 {{
             color: var(--primary-light);
             margin-bottom: 10px;
-        }}
-        
-        .title-link {{
-            color: var(--primary-light);
-            text-decoration: none;
-            transition: color 0.3s;
-        }}
-        
-        .title-link:hover {{
-            color: var(--secondary-color);
         }}
         
         h2 {{
@@ -1171,6 +1248,16 @@ public class HubbleController
             .log-category {{
                 max-width: 100%;
             }}
+        }}
+        
+        .title-link {{
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: color 0.3s;
+        }}
+        
+        .title-link:hover {{
+            color: var(--secondary-color);
         }}
     </style>
     <!-- Hack para forzar estilos en selects para todos los navegadores -->
