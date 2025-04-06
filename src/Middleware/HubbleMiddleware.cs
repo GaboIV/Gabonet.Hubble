@@ -98,8 +98,6 @@ public class HubbleMiddleware
                         // Guardar el log en el contexto HTTP
                         context.Items["Hubble_RequestLog"] = initialLog;
                         requestLog = initialLog;
-                        
-                        Console.WriteLine($"Log inicial creado con ID: {initialLog.Id}");
                     }
                 }
                 catch (Exception ex)
@@ -159,7 +157,6 @@ public class HubbleMiddleware
                             requestLog.ActionName = actionName;
                             
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
-                            Console.WriteLine($"Log actualizado: {requestLog.Id}");
                         }
                         else
                         {

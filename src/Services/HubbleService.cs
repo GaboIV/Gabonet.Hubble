@@ -250,9 +250,7 @@ public class HubbleService : IHubbleService
         {
             // Obtenemos el ID del log de la solicitud si existe
             if (httpContext.Items["Hubble_RequestLog"] is GeneralLog requestLog)
-            {
-                Console.WriteLine($"Asociando log '{cleanMessage}' a la solicitud {requestLog.Id}");
-                
+            {                
                 // Creamos un log de aplicación que será registrado separadamente
                 // pero con una referencia al ID de la solicitud HTTP
                 var logEntry = new GeneralLog
