@@ -395,9 +395,84 @@ public class HubbleController
 
         html += "<h2 class='page-title'>Detalle del Log</h2>";
 
+        // Estilos para acordeón
+        html += @"
+        <style>
+            .card {
+                margin-bottom: 15px;
+                border-radius: 8px;
+                overflow: hidden;
+            }
+            .card-header {
+                background-color: var(--surface);
+                padding: 15px;
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: background-color 0.3s;
+            }
+            .card-header:hover {
+                background-color: #2a2a2a;
+            }
+            .card-header h2 {
+                margin: 0;
+                font-size: 1.2rem;
+            }
+            .card-header::after {
+                content: '▼';
+                font-size: 12px;
+                transition: transform 0.3s;
+            }
+            .card-header.collapsed::after {
+                transform: rotate(-90deg);
+            }
+            .card-content {
+                background-color: var(--surface);
+                overflow: hidden;
+            }
+            .card-header.collapsed + .card-content {
+                display: none;
+            }
+            .card-content-inner {
+                padding: 15px;
+            }
+            .error-card .card-header {
+                background-color: rgba(207, 102, 121, 0.2);
+            }
+            .error-card .card-content {
+                background-color: rgba(207, 102, 121, 0.1);
+            }
+        </style>";
+
+        // Script para funcionalidad de acordeón
+        html += @"
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                // Funcionalidad de acordeón para las tarjetas
+                const cardHeaders = document.querySelectorAll('.card-header');
+                cardHeaders.forEach(header => {
+                    header.addEventListener('click', function() {
+                        this.classList.toggle('collapsed');
+                    });
+                });
+                
+                // Expandir la primera tarjeta por defecto
+                if (cardHeaders.length > 0) {
+                    cardHeaders[0].classList.remove('collapsed');
+                }
+
+                // Colapsar el resto de tarjetas
+                for (let i = 1; i < cardHeaders.length; i++) {
+                    cardHeaders[i].classList.add('collapsed');
+                }
+            });
+        </script>";
+
         // Información general
         html += "<div class='card'>";
-        html += "<h2>Información General</h2>";
+        html += "<div class='card-header'><h2>Información General</h2></div>";
+        html += "<div class='card-content'><div class='card-content-inner'>";
         html += "<div class='info-grid'>";
         html += $"<div class='info-item'><span>Fecha/Hora:</span> {log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")}</div>";
         html += $"<div class='info-item'><span>Método:</span> {log.Method}</div>";
@@ -409,13 +484,15 @@ public class HubbleController
         html += $"<div class='info-item'><span>IP Cliente:</span> {log.IpAddress}</div>";
         html += $"<div class='info-item'><span>Servicio:</span> {log.ServiceName}</div>";
         html += "</div>";
+        html += "</div></div>";
         html += "</div>";
 
         // Si hay error
         if (log.IsError || !string.IsNullOrEmpty(log.ErrorMessage))
         {
             html += "<div class='card error-card'>";
-            html += "<h2>Error</h2>";
+            html += "<div class='card-header collapsed'><h2>Error</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             html += $"<div class='code-block'>{log.ErrorMessage}</div>";
             
             if (!string.IsNullOrEmpty(log.StackTrace))
@@ -424,6 +501,7 @@ public class HubbleController
                 html += $"<div class='code-block'>{log.StackTrace}</div>";
             }
             
+            html += "</div></div>";
             html += "</div>";
         }
 
@@ -431,8 +509,10 @@ public class HubbleController
         if (!string.IsNullOrEmpty(log.RequestHeaders))
         {
             html += "<div class='card'>";
-            html += "<h2>Cabeceras de la Solicitud</h2>";
+            html += "<div class='card-header collapsed'><h2>Cabeceras de la Solicitud</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             html += $"<div class='code-block'>{FormatJson(log.RequestHeaders)}</div>";
+            html += "</div></div>";
             html += "</div>";
         }
 
@@ -440,8 +520,10 @@ public class HubbleController
         if (!string.IsNullOrEmpty(log.RequestData))
         {
             html += "<div class='card'>";
-            html += "<h2>Datos de la Solicitud</h2>";
+            html += "<div class='card-header collapsed'><h2>Datos de la Solicitud</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             html += $"<div class='code-block'>{FormatJson(log.RequestData)}</div>";
+            html += "</div></div>";
             html += "</div>";
         }
 
@@ -449,8 +531,10 @@ public class HubbleController
         if (!string.IsNullOrEmpty(log.ResponseData))
         {
             html += "<div class='card'>";
-            html += "<h2>Datos de la Respuesta</h2>";
+            html += "<div class='card-header collapsed'><h2>Datos de la Respuesta</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             html += $"<div class='code-block'>{FormatJson(log.ResponseData)}</div>";
+            html += "</div></div>";
             html += "</div>";
         }
 
@@ -458,7 +542,8 @@ public class HubbleController
         if (log.DatabaseQueries.Count > 0)
         {
             html += "<div class='card'>";
-            html += "<h2>Consultas a Bases de Datos</h2>";
+            html += "<div class='card-header collapsed'><h2>Consultas a Bases de Datos</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             
             foreach (var query in log.DatabaseQueries)
             {
@@ -490,6 +575,7 @@ public class HubbleController
                 html += "</div>";
             }
             
+            html += "</div></div>";
             html += "</div>";
         }
         
@@ -498,7 +584,8 @@ public class HubbleController
         if (relatedLogs.Count > 0)
         {
             html += "<div class='card'>";
-            html += "<h2>Loggers</h2>";
+            html += "<div class='card-header collapsed'><h2>Loggers</h2></div>";
+            html += "<div class='card-content'><div class='card-content-inner'>";
             
             // Agrupar logs por categoría (RequestData contiene el nombre de la categoría)
             var logsByCategory = relatedLogs
@@ -543,6 +630,7 @@ public class HubbleController
                 html += "</div>"; // Cierre de category-group
             }
             
+            html += "</div></div>";
             html += "</div>";
         }
 
