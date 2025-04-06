@@ -461,4 +461,14 @@ public class HubbleOptions
     /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
+    
+    /// <summary>
+    /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
+    /// </summary>
+    public bool HighlightNewServices { get; set; } = false;
+    
+    /// <summary>
+    /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
+    /// </summary>
+    public int HighlightDurationSeconds { get; set; } = 5;
 } 

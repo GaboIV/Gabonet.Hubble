@@ -18,6 +18,8 @@ public class HubbleController
     private readonly IHubbleService _hubbleService;
     private readonly string _version;
     private readonly string _basePath;
+    private readonly Middleware.HubbleOptions _options;
+    private static readonly Dictionary<string, DateTime> _detectedServices = new Dictionary<string, DateTime>();
 
     /// <summary>
     /// Constructor del controlador de Hubble.
@@ -29,6 +31,7 @@ public class HubbleController
         _hubbleService = hubbleService;
         _version = GetAssemblyVersion();
         _basePath = options.BasePath.TrimEnd('/');
+        _options = options;
     }
     
     /// <summary>
@@ -208,7 +211,41 @@ public class HubbleController
             var formattedTime = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
             var isILoggerEntry = log.ControllerName == "ApplicationLogger";
             
-            html += $"<tr class='{statusClass}'>";
+            // Detectar y resaltar nuevos servicios si está habilitada la opción
+            var highlightClass = "";
+            if (_options.HighlightNewServices && !string.IsNullOrEmpty(log.ServiceName))
+            {
+                bool isNewService = false;
+                
+                // Verificar si el servicio ya está en la lista de servicios detectados
+                if (!_detectedServices.ContainsKey(log.ServiceName))
+                {
+                    // Es un servicio nuevo, agregarlo a la lista
+                    _detectedServices[log.ServiceName] = DateTime.UtcNow;
+                    isNewService = true;
+                }
+                else
+                {
+                    // Verificar si el servicio sigue dentro del tiempo de resaltado
+                    var detectionTime = _detectedServices[log.ServiceName];
+                    if ((DateTime.UtcNow - detectionTime).TotalSeconds <= _options.HighlightDurationSeconds)
+                    {
+                        isNewService = true;
+                    }
+                    else
+                    {
+                        // El servicio ya no es nuevo, actualizar la marca de tiempo para futuros logs
+                        _detectedServices[log.ServiceName] = DateTime.UtcNow.AddSeconds(-_options.HighlightDurationSeconds - 1);
+                    }
+                }
+                
+                if (isNewService)
+                {
+                    highlightClass = " new-service";
+                }
+            }
+            
+            html += $"<tr class='{statusClass}{highlightClass}'>";
             html += $"<td>{formattedTime}</td>";
             
             // Mostrar tipo de log
@@ -360,6 +397,46 @@ public class HubbleController
 
         html += GenerateHtmlFooter();
         
+        // Agregar script para recarga automática si está habilitada la opción de resaltar servicios en tiempo real
+        if (_options.HighlightNewServices)
+        {
+            html += @"
+<script>
+    // Función para recargar la página preservando los filtros actuales
+    function reloadPageWithFilters() {
+        // Obtener la URL actual con todos sus parámetros
+        var currentUrl = window.location.href;
+        // Recargar preservando la posición de scroll
+        var scrollPosition = window.scrollY;
+        
+        // Usar fetch para cargar la página en segundo plano sin perder el estado
+        fetch(currentUrl)
+            .then(response => response.text())
+            .then(html => {
+                // Extraer solo el contenido de la tabla
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const newTable = doc.querySelector('.table-container');
+                
+                if (newTable) {
+                    // Reemplazar solo la tabla, manteniendo el resto de la página
+                    document.querySelector('.table-container').innerHTML = newTable.innerHTML;
+                    
+                    // Restaurar la posición de scroll
+                    window.scrollTo(0, scrollPosition);
+                }
+            })
+            .catch(error => {
+                console.error('Error al recargar la tabla:', error);
+            });
+    }
+    
+    // Configurar recarga automática cada 3 segundos para actualizar la tabla de servicios
+    setInterval(reloadPageWithFilters, 3000);
+</script>";
+        }
+        
+        html += "</body></html>";
         return html;
     }
 
@@ -1093,6 +1170,26 @@ public class HubbleController
         
         .data-table tr.error:hover {{
             background-color: rgba(207, 102, 121, 0.2);
+        }}
+        
+        /* Estilo para nuevos servicios detectados en tiempo real */
+        .data-table tr.new-service {{
+            background-color: rgba(255, 235, 59, 0.15);
+            animation: highlight-new 5s ease-out;
+        }}
+        
+        .data-table tr.new-service:hover {{
+            background-color: rgba(255, 235, 59, 0.3);
+        }}
+        
+        .data-table tr.error.new-service {{
+            background-color: rgba(207, 102, 121, 0.1);
+            border-left: 4px solid rgba(255, 235, 59, 0.8);
+        }}
+        
+        @keyframes highlight-new {{
+            0% {{ background-color: rgba(255, 235, 59, 0.4); }}
+            100% {{ background-color: rgba(255, 235, 59, 0.15); }}
         }}
         
         .url-cell {{
