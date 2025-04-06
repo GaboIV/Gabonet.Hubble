@@ -56,7 +56,10 @@ public static class ServiceCollectionExtensions
             ServiceName = serviceName,
             // Activar por defecto la captura de logs
             CaptureLoggerMessages = true,
-            BasePath = "/hubble"
+            BasePath = "/hubble",
+            // Por defecto, no destacar nuevos servicios
+            HighlightNewServices = false,
+            HighlightDurationSeconds = 5
         });
 
         return services;
@@ -112,7 +115,9 @@ public static class ServiceCollectionExtensions
             RequireAuthentication = config.RequireAuthentication,
             Username = config.Username,
             Password = config.Password,
-            BasePath = config.BasePath
+            BasePath = config.BasePath,
+            HighlightNewServices = config.HighlightNewServices,
+            HighlightDurationSeconds = config.HighlightDurationSeconds
         });
 
         return services;
@@ -221,4 +226,14 @@ public class HubbleConfiguration
     /// Ruta base para acceder a la interfaz de Hubble
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
+    
+    /// <summary>
+    /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
+    /// </summary>
+    public bool HighlightNewServices { get; set; } = false;
+    
+    /// <summary>
+    /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
+    /// </summary>
+    public int HighlightDurationSeconds { get; set; } = 5;
 } 

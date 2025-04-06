@@ -98,8 +98,6 @@ public class HubbleMiddleware
                         // Guardar el log en el contexto HTTP
                         context.Items["Hubble_RequestLog"] = initialLog;
                         requestLog = initialLog;
-                        
-                        Console.WriteLine($"Log inicial creado con ID: {initialLog.Id}");
                     }
                 }
                 catch (Exception ex)
@@ -159,7 +157,6 @@ public class HubbleMiddleware
                             requestLog.ActionName = actionName;
                             
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
-                            Console.WriteLine($"Log actualizado: {requestLog.Id}");
                         }
                         else
                         {
@@ -461,4 +458,14 @@ public class HubbleOptions
     /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
+    
+    /// <summary>
+    /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
+    /// </summary>
+    public bool HighlightNewServices { get; set; } = false;
+    
+    /// <summary>
+    /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
+    /// </summary>
+    public int HighlightDurationSeconds { get; set; } = 5;
 } 
