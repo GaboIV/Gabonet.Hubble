@@ -715,7 +715,7 @@ public class HubbleController
     /// Genera el logo de Hubble en formato SVG.
     /// </summary>
     /// <returns>HTML con el logo SVG</returns>
-    private string GetHubbleLogo()
+    public string GetHubbleLogo()
     {
         return $@"<div class='logo-container'>
             <a href='{_basePath}' title='Recargar Hubble Dashboard' class='logo-link'>

@@ -232,6 +232,10 @@ public class HubbleUIMiddleware
         var options = context.RequestServices.GetRequiredService<HubbleOptions>();
         var basePath = options.BasePath.ToLower();
         
+        // Obtener el controlador para acceder al logo
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var hubbleLogo = hubbleController.GetHubbleLogo();
+        
         var html = $@"
 <!DOCTYPE html>
 <html lang='es'>
@@ -283,10 +287,15 @@ public class HubbleUIMiddleware
             margin-bottom: 2rem;
         }}
         
-        .login-title {{
-            color: var(--primary-light);
-            font-size: 1.8rem;
-            margin-bottom: 0.5rem;
+        .login-logo {{
+            margin-bottom: 1rem;
+        }}
+        
+        .logo-container {{
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 15px;
         }}
         
         .login-subtitle {{
@@ -356,7 +365,9 @@ public class HubbleUIMiddleware
 <body>
     <div class='login-container'>
         <div class='login-header'>
-            <h1 class='login-title'>Hubble</h1>
+            <div class='login-logo'>
+                {hubbleLogo}
+            </div>
             <p class='login-subtitle'>Inicia sesión para continuar</p>
         </div>
         
