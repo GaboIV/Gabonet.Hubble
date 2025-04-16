@@ -82,7 +82,10 @@ public class HubbleService : IHubbleService
             {
                 if (!string.IsNullOrWhiteSpace(word))
                 {
-                    filter &= filterBuilder.Regex(log => log.HttpUrl, new MongoDB.Bson.BsonRegularExpression(word, "i"));
+                    // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new MongoDB.Bson.BsonRegularExpression(word, "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new MongoDB.Bson.BsonRegularExpression(word, "i"));
+                    filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }
         }
@@ -345,7 +348,10 @@ public class HubbleService : IHubbleService
             {
                 if (!string.IsNullOrWhiteSpace(word))
                 {
-                    filter &= filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
+                    // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(word, "i"));
+                    filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }
         }
@@ -391,7 +397,10 @@ public class HubbleService : IHubbleService
             {
                 if (!string.IsNullOrWhiteSpace(word))
                 {
-                    filter &= filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
+                    // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(word, "i"));
+                    filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }
         }

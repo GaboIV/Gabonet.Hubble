@@ -30,6 +30,12 @@ public class GeneralLog
     public string HttpUrl { get; set; } = string.Empty;
 
     /// <summary>
+    /// Parámetros de consulta de la URL (query string)
+    /// </summary>
+    [BsonElement("queryParams")]
+    public string QueryParams { get; set; } = string.Empty;
+
+    /// <summary>
     /// Nombre del controlador que procesó la solicitud
     /// </summary>
     [BsonElement("controllerName")]
