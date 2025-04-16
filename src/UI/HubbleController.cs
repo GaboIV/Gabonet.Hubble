@@ -1,8 +1,6 @@
 namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Interfaces;
-using Gabonet.Hubble.Models;
-using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -61,11 +59,11 @@ public class HubbleController
                 }
             }
 
-            return "v0.2.4.13"; // Versión por defecto como fallback
+            return "v0.2.8"; // Versión por defecto como fallback
         }
         catch
         {
-            return "v0.2.4.13"; // En caso de error, devolver versión por defecto
+            return "v0.2.8"; // En caso de error, devolver versión por defecto
         }
     }
 
