@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using System;
+using System.Collections.Generic;
 
 /// <summary>
 /// Extensiones para configurar los servicios de Hubble en la aplicación.
@@ -59,7 +60,8 @@ public static class ServiceCollectionExtensions
             BasePath = "/hubble",
             // Por defecto, no destacar nuevos servicios
             HighlightNewServices = false,
-            HighlightDurationSeconds = 5
+            HighlightDurationSeconds = 5,
+            IgnorePaths = new List<string>()
         });
 
         return services;
@@ -117,7 +119,8 @@ public static class ServiceCollectionExtensions
             Password = config.Password,
             BasePath = config.BasePath,
             HighlightNewServices = config.HighlightNewServices,
-            HighlightDurationSeconds = config.HighlightDurationSeconds
+            HighlightDurationSeconds = config.HighlightDurationSeconds,
+            IgnorePaths = config.IgnorePaths ?? new List<string>()
         });
 
         return services;
@@ -186,6 +189,11 @@ public class HubbleConfiguration
     /// ID de la zona horaria para mostrar las fechas
     /// </summary>
     public string TimeZoneId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Lista de rutas que deben ser ignoradas por el middleware
+    /// </summary>
+    public List<string> IgnorePaths { get; set; } = new List<string>();
 
     /// <summary>
     /// Habilitar diagnósticos

@@ -86,6 +86,7 @@ public class HubbleMiddleware
                         {
                             ServiceName = _options.ServiceName,
                             HttpUrl = context.Request.Path,
+                            QueryParams = context.Request.QueryString.Value ?? string.Empty,
                             Method = context.Request.Method,
                             RequestData = request,
                             RequestHeaders = FormatHeaders(context.Request.Headers),
@@ -131,6 +132,7 @@ public class HubbleMiddleware
                             requestLog.StatusCode = context.Response.StatusCode;
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
+                            requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
                             
                             string controllerName = "Unknown";
                             string actionName = "Unknown";
@@ -211,6 +213,7 @@ public class HubbleMiddleware
                             requestLog.StackTrace = ex.StackTrace;
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
+                            requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
                             
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
                         }
@@ -339,6 +342,7 @@ public class HubbleMiddleware
             ControllerName = controllerName,
             ActionName = actionName,
             HttpUrl = context.Request.Path,
+            QueryParams = context.Request.QueryString.Value ?? string.Empty,
             Method = context.Request.Method,
             RequestData = request,
             ResponseData = response,

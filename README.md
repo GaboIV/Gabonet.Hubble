@@ -42,6 +42,57 @@ builder.Logging.AddHubbleLogging(LogLevel.Information);  // Puedes cambiar el ni
 app.UseHubble();
 ```
 
+### Ignorar rutas específicas
+
+Hubble permite configurar rutas específicas que serán ignoradas por el middleware, lo que es útil para endpoints como health checks, métricas o cualquier otra ruta que no desees monitorear.
+
+```csharp
+services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "hubble";
+    options.ServiceName = "MiServicio";
+
+    // Configurar rutas a ignorar
+    options.IgnorePaths = new List<string>
+    {
+        "/health",
+        "/metrics",
+        "/test",
+        "/swagger"
+    };
+});
+```
+
+Todas las rutas que comiencen con cualquiera de los prefijos especificados en `IgnorePaths` serán ignoradas por el middleware de Hubble. Por ejemplo, si especificas `/health`, se ignorarán rutas como `/health`, `/health/status`, `/health/check`, etc.
+
+### Ejemplo completo de configuración
+
+```csharp
+services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "hubble";
+    options.ServiceName = "MiServicio";
+    
+    // Configurar rutas a ignorar
+    options.IgnorePaths = new List<string>
+    {
+        "/health",
+        "/metrics"
+    };
+    
+    // Otras opciones
+    options.BasePath = "/hubble";
+    options.CaptureLoggerMessages = true;
+    options.CaptureHttpRequests = true;
+    options.EnableDiagnostics = false;
+});
+
+// Agregar el middleware a la pipeline
+app.UseHubble();
+```
+
 ## Uso
 
 ### Visualización de logs

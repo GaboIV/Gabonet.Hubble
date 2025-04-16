@@ -1,8 +1,6 @@
 namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Interfaces;
-using Gabonet.Hubble.Models;
-using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -61,11 +59,11 @@ public class HubbleController
                 }
             }
 
-            return "v0.2.4.13"; // Versión por defecto como fallback
+            return "v0.2.8"; // Versión por defecto como fallback
         }
         catch
         {
-            return "v0.2.4.13"; // En caso de error, devolver versión por defecto
+            return "v0.2.8"; // En caso de error, devolver versión por defecto
         }
     }
 
@@ -265,7 +263,17 @@ public class HubbleController
             }
             else
             {
-                html += $"<td class='url-cell'>{log.HttpUrl}</td>";
+                // Mostrar URL y QueryParams en una sola línea
+                html += "<td class='url-cell'>";
+                html += $"<div class='url-path'>{log.HttpUrl}</div>";
+                
+                // Mostrar QueryParams si no están vacíos
+                if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
+                {
+                    html += $"<div class='url-params'>{log.QueryParams}</div>";
+                }
+                
+                html += "</td>";
             }
 
             html += $"<td>{log.StatusCode}</td>";
@@ -571,14 +579,25 @@ public class HubbleController
         html += "<div class='info-grid'>";
         html += $"<div class='info-item'><span>Fecha/Hora:</span> {log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")}</div>";
         html += $"<div class='info-item'><span>Método:</span> {log.Method}</div>";
-        html += $"<div class='info-item'><span>URL:</span> {log.HttpUrl}</div>";
         html += $"<div class='info-item'><span>Controlador:</span> {log.ControllerName}</div>";
         html += $"<div class='info-item'><span>Acción:</span> {log.ActionName}</div>";
         html += $"<div class='info-item'><span>Estado:</span> <span class='{(log.IsError || log.StatusCode >= 400 ? "error-text" : "success-text")}'>{log.StatusCode}</span></div>";
         html += $"<div class='info-item'><span>Duración:</span> {log.ExecutionTime} ms</div>";
-        html += $"<div class='info-item'><span>IP Cliente:</span> {log.IpAddress}</div>";
-        html += $"<div class='info-item'><span>Servicio:</span> {log.ServiceName}</div>";
         html += "</div>";
+        
+        // URL con QueryParams en una línea completa
+        html += "<div class='url-item'>";
+        html += "<div class='url-label'>URL:</div>";
+        html += $"<div class='url-value'>{log.HttpUrl}</div>";
+        
+        // Mostrar QueryParams si no están vacíos
+        if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
+        {
+            html += $"<div class='url-params-line'>{log.QueryParams}</div>";
+        }
+        
+        html += "</div>";
+        
         html += "</div></div>";
         html += "</div>";
 
@@ -1233,9 +1252,29 @@ public class HubbleController
         
         .url-cell {{
             max-width: 300px;
+            padding: 8px 12px !important;
+        }}
+        
+        .url-path {{
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
+        }}
+        
+        .url-params {{
+            color: var(--primary-light);
+            font-size: 0.85em;
+            margin-top: 3px;
+            padding: 2px 5px;
+            background-color: rgba(187, 134, 252, 0.1);
+            border-radius: 3px;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            display: block;
         }}
         
         .pagination {{
@@ -1356,6 +1395,46 @@ public class HubbleController
         .info-item span:first-child {{
             color: var(--text-secondary);
             margin-right: 5px;
+        }}
+        
+        /* Estilos para URL con QueryParams en la página de detalle */
+        .url-item {{
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #292929;
+            border-radius: 4px;
+            border-left: 4px solid var(--primary-light);
+        }}
+        
+        .url-label {{
+            display: block;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            font-weight: 500;
+        }}
+        
+        .url-value {{
+            display: block;
+            word-break: break-all;
+            color: var(--text-primary);
+            font-family: 'Consolas', 'Monaco', monospace;
+        }}
+        
+        .url-params-line {{
+            display: block;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: rgba(187, 134, 252, 0.1);
+            border-radius: 4px;
+            color: var(--primary-light);
+            font-family: 'Consolas', 'Monaco', monospace;
+            word-break: break-all;
+        }}
+        
+        .url-detail {{
+            display: inline-flex;
+            flex-direction: column;
+            max-width: 100%;
         }}
         
         .error-text {{
