@@ -61,7 +61,8 @@ public static class ServiceCollectionExtensions
             // Por defecto, no destacar nuevos servicios
             HighlightNewServices = false,
             HighlightDurationSeconds = 5,
-            IgnorePaths = new List<string>()
+            IgnorePaths = new List<string>(),
+            TimeZoneId = timeZoneId ?? string.Empty
         });
 
         return services;
@@ -123,7 +124,8 @@ public static class ServiceCollectionExtensions
             IgnorePaths = config.IgnorePaths ?? new List<string>(),
             EnableDataPrune = config.EnableDataPrune,
             DataPruneIntervalHours = config.DataPruneIntervalHours,
-            MaxLogAgeHours = config.MaxLogAgeHours
+            MaxLogAgeHours = config.MaxLogAgeHours,
+            TimeZoneId = config.TimeZoneId
         });
 
         return services;

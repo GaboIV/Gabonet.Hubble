@@ -13,6 +13,7 @@ public class HubbleDataPruneManager
     private DateTime? _lastPruneAttempt;
     private static readonly object _lockObject = new object();
     private static bool _isPruneRunning = false;
+    private readonly TimeZoneInfo _timeZone;
 
     /// <summary>
     /// Constructor del administrador de limpieza de datos.
@@ -22,6 +23,23 @@ public class HubbleDataPruneManager
     {
         _options = options;
         _lastPruneAttempt = null;
+        
+        // Determinar la zona horaria a utilizar
+        try
+        {
+            if (string.IsNullOrEmpty(options.TimeZoneId))
+            {
+                _timeZone = TimeZoneInfo.Utc;
+            }
+            else
+            {
+                _timeZone = TimeZoneInfo.FindSystemTimeZoneById(options.TimeZoneId);
+            }
+        }
+        catch (Exception)
+        {
+            _timeZone = TimeZoneInfo.Utc;
+        }
         
         if (options.EnableDataPrune)
         {
@@ -58,20 +76,20 @@ public class HubbleDataPruneManager
                 shouldPrune = true;
                 _isPruneRunning = true;
                 _lastPruneAttempt = now;
-                Console.WriteLine($"[Hubble] Primera ejecución del proceso de limpieza");
+                
+                // Mostrar la fecha en la zona horaria configurada
+                var localTime = TimeZoneInfo.ConvertTimeFromUtc(now, _timeZone);
             }
             else if ((now - _lastPruneAttempt.Value).TotalHours >= _options.DataPruneIntervalHours)
             {
                 shouldPrune = true;
                 _isPruneRunning = true;
-                Console.WriteLine($"[Hubble] Han pasado {Math.Round((now - _lastPruneAttempt.Value).TotalHours, 2)} horas desde la última limpieza");
                 _lastPruneAttempt = now;
             }
             else
             {
                 // Calcular cuánto tiempo falta para la próxima limpieza
                 var hoursToNextPrune = _options.DataPruneIntervalHours - (now - _lastPruneAttempt.Value).TotalHours;
-                Console.WriteLine($"[Hubble] Próxima limpieza en {Math.Round(hoursToNextPrune, 2)} hora(s)");
             }
         }
 
@@ -79,13 +97,18 @@ public class HubbleDataPruneManager
         {
             try
             {
-                Console.WriteLine($"[Hubble] Iniciando proceso de limpieza de datos históricos ({now})");
+                // Convertir la fecha a la zona horaria configurada para mostrarla
+                var localTime = TimeZoneInfo.ConvertTimeFromUtc(now, _timeZone);
+                Console.WriteLine($"[Hubble] Iniciando proceso de limpieza de datos históricos ({localTime})");
                 
                 // Calcular la fecha límite para eliminar logs
                 var cutoffDate = now.AddHours(-_options.MaxLogAgeHours);
-                Console.WriteLine($"[Hubble] Eliminando logs anteriores a {cutoffDate}");
                 
-                // Ejecutar la limpieza
+                // Convertir la fecha límite a la zona horaria configurada para mostrarla
+                var localCutoffDate = TimeZoneInfo.ConvertTimeFromUtc(cutoffDate, _timeZone);
+                Console.WriteLine($"[Hubble] Eliminando logs anteriores a {localCutoffDate}");
+                
+                // Ejecutar la limpieza (usar UTC para la operación real)
                 var deletedCount = await hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
                 
                 Console.WriteLine($"[Hubble] Proceso de limpieza completado. {deletedCount} logs eliminados.");

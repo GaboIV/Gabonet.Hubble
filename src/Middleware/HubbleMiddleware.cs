@@ -505,4 +505,9 @@ public class HubbleOptions
     /// Edad máxima en horas que se conservarán los logs antes de ser eliminados.
     /// </summary>
     public int MaxLogAgeHours { get; set; } = 24;
+    
+    /// <summary>
+    /// ID de la zona horaria para mostrar las fechas. Si está vacío, se usará UTC.
+    /// </summary>
+    public string TimeZoneId { get; set; } = string.Empty;
 } 
