@@ -41,9 +41,21 @@ public class HubbleService : IHubbleService
         _serviceName = serviceName;
         
         // Usar la zona horaria especificada o UTC por defecto
-        _timeZone = string.IsNullOrEmpty(timeZoneId) 
-            ? TimeZoneInfo.Utc 
-            : TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        try
+        {
+            if (string.IsNullOrEmpty(timeZoneId))
+            {
+                _timeZone = TimeZoneInfo.Utc;
+            }
+            else
+            {
+                _timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _timeZone = TimeZoneInfo.Utc;
+        }
     }
 
     /// <inheritdoc />
@@ -104,7 +116,14 @@ public class HubbleService : IHubbleService
         // Convertir las fechas a la zona horaria configurada
         foreach (var log in pagedLogs)
         {
-            log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            try
+            {
+                log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            }
+            catch (Exception ex)
+            {
+                // Mantener la fecha original sin conversión
+            }
         }
 
         return pagedLogs;
@@ -319,7 +338,13 @@ public class HubbleService : IHubbleService
         // Convertir las fechas a la zona horaria configurada
         foreach (var log in logs)
         {
-            log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            try
+            {
+                log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            }
+            catch (Exception ex)
+            {
+            }
         }
         
         return logs;
@@ -356,9 +381,7 @@ public class HubbleService : IHubbleService
             }
         }
 
-        // Si se deben excluir logs relacionados, añadir filtro para excluir ApplicationLogger
-        // logs que tengan RelatedRequestId (significa que son logs generados por ILogger
-        // y relacionados con una solicitud HTTP)
+        // Aplicar el mismo filtro de exclusión que en GetFilteredLogsWithRelatedAsync
         if (excludeRelatedLogs)
         {
             var appLoggerFilter = filterBuilder.Eq(log => log.ControllerName, "ApplicationLogger");
@@ -368,8 +391,19 @@ public class HubbleService : IHubbleService
             filter &= filterBuilder.Not(filterBuilder.And(appLoggerFilter, hasRelatedRequestId));
         }
 
-        // Devolver el conteo total de logs que cumplen los criterios
-        return await _logsCollection.CountDocumentsAsync(filter);
+        // Contar los registros
+        var count = await _logsCollection.CountDocumentsAsync(filter);
+        return count;
+    }
+
+    /// <inheritdoc />
+    public async Task<long> DeleteLogsOlderThanAsync(DateTime cutoffDate)
+    {
+        var filterBuilder = Builders<GeneralLog>.Filter;
+        var filter = filterBuilder.Lt(log => log.Timestamp, cutoffDate);
+        
+        var result = await _logsCollection.DeleteManyAsync(filter);
+        return result.DeletedCount;
     }
 
     /// <inheritdoc />
@@ -431,7 +465,14 @@ public class HubbleService : IHubbleService
         // Convertir las fechas a la zona horaria configurada
         foreach (var log in pagedLogs)
         {
-            log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            try
+            {
+                var originalTimestamp = log.Timestamp;
+                log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
+            }
+            catch (Exception ex)
+            {
+            }
         }
 
         return pagedLogs;

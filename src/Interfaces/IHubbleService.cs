@@ -137,4 +137,11 @@ public interface IHubbleService
         string? method = null,
         string? url = null,
         bool excludeRelatedLogs = true);
+
+    /// <summary>
+    /// Elimina logs más antiguos que la fecha especificada.
+    /// </summary>
+    /// <param name="cutoffDate">Fecha límite para eliminar logs (los logs anteriores a esta fecha serán eliminados)</param>
+    /// <returns>Número de logs eliminados</returns>
+    Task<long> DeleteLogsOlderThanAsync(DateTime cutoffDate);
 } 

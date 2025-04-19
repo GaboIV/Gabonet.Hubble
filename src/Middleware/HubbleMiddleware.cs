@@ -24,6 +24,7 @@ public class HubbleMiddleware
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IServiceProvider _serviceProvider;
     private readonly HubbleOptions _options;
+    private readonly HubbleDataPruneManager _pruneManager;
 
     /// <summary>
     /// Constructor del middleware de Hubble.
@@ -42,6 +43,17 @@ public class HubbleMiddleware
         _httpContextAccessor = httpContextAccessor;
         _serviceProvider = serviceProvider;
         _options = options;
+        _pruneManager = new HubbleDataPruneManager(options);
+        
+        // Mostrar información de inicialización
+        Console.WriteLine($"[Hubble] Servicio inicializado para: {options.ServiceName}");
+        Console.WriteLine($"[Hubble] Limpieza automática de datos: {(options.EnableDataPrune ? "Activada" : "Desactivada")}");
+        
+        if (options.EnableDataPrune)
+        {
+            Console.WriteLine($"[Hubble] Intervalo de limpieza: {options.DataPruneIntervalHours} hora(s)");
+            Console.WriteLine($"[Hubble] Se conservarán logs de las últimas {options.MaxLogAgeHours} hora(s)");
+        }
     }
 
     /// <summary>
@@ -174,6 +186,9 @@ public class HubbleMiddleware
                                 databaseQueries, 
                                 executionTime);
                         }
+                        
+                        // Ejecutar la limpieza de datos históricos si está habilitada
+                        await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
                 }
                 catch (Exception serviceEx)
@@ -231,6 +246,9 @@ public class HubbleMiddleware
                                 databaseQueries, 
                                 executionTime);
                         }
+                        
+                        // Ejecutar la limpieza de datos históricos si está habilitada
+                        await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
                 }
                 catch (Exception serviceEx)
@@ -472,4 +490,19 @@ public class HubbleOptions
     /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
+    
+    /// <summary>
+    /// Activa o desactiva el sistema de limpieza automática de logs antiguos.
+    /// </summary>
+    public bool EnableDataPrune { get; set; } = false;
+    
+    /// <summary>
+    /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs.
+    /// </summary>
+    public int DataPruneIntervalHours { get; set; } = 1;
+    
+    /// <summary>
+    /// Edad máxima en horas que se conservarán los logs antes de ser eliminados.
+    /// </summary>
+    public int MaxLogAgeHours { get; set; } = 24;
 } 
