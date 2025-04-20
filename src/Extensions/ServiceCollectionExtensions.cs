@@ -98,18 +98,8 @@ public static class ServiceCollectionExtensions
         // Registrar el acceso al contexto HTTP
         services.AddHttpContextAccessor();
 
-        // Registrar el servicio de Hubble
-        services.AddScoped<IHubbleService>(provider =>
-        {
-            var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
-            return new HubbleService(mongoClient, config.DatabaseName, httpContextAccessor, config.ServiceName, config.TimeZoneId);
-        });
-
-        // Registrar el controlador de Hubble
-        services.AddTransient<HubbleController>();
-
         // Registrar las opciones
-        services.AddSingleton(new HubbleOptions
+        var options = new HubbleOptions
         {
             ServiceName = config.ServiceName,
             EnableDiagnostics = config.EnableDiagnostics,
@@ -126,7 +116,33 @@ public static class ServiceCollectionExtensions
             DataPruneIntervalHours = config.DataPruneIntervalHours,
             MaxLogAgeHours = config.MaxLogAgeHours,
             TimeZoneId = config.TimeZoneId
+        };
+        
+        services.AddSingleton(options);
+
+        // Registrar el servicio de Hubble
+        services.AddScoped<IHubbleService>(provider =>
+        {
+            var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
+            return new HubbleService(mongoClient, config.DatabaseName, httpContextAccessor, config.ServiceName, config.TimeZoneId);
         });
+        
+        // Registrar el servicio de estadísticas de Hubble
+        services.AddSingleton<IHubbleStatsService>(provider =>
+        {
+            var logger = provider.GetRequiredService<ILogger<HubbleStatsService>>();
+            return new HubbleStatsService(mongoClient, config.DatabaseName, options, logger);
+        });
+
+        // Registrar el controlador de Hubble
+        services.AddTransient<HubbleController>();
+        
+        // Registrar el servicio de limpieza de datos si está habilitado
+        if (config.EnableDataPrune)
+        {
+            services.AddHostedService<BackgroundServices.DataPruneService>();
+            Console.WriteLine($"[Hubble] Servicio de limpieza automática habilitado (Intervalo: {config.DataPruneIntervalHours}h, Max. edad: {config.MaxLogAgeHours}h)");
+        }
 
         return services;
     }
