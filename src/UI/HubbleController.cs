@@ -1798,12 +1798,14 @@ public class HubbleController
             var timeAgoText = FormatTimeAgo(timeAgo);
             
             html += "<div class='stats-grid'>";
-            html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:dd/MM/yyyy HH:mm:ss}</span><span class='stat-label'>Última limpieza ({timeAgoText})</span></div>";
+            html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:dd/MM/yyyy}</span><span class='stat-label'>Fecha</span></div>";
+            html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:HH:mm:ss}</span><span class='stat-label'>Hora</span></div>";
             html += $"<div class='stat-item'><span class='stat-value'>{stats.LastPrune.LogsDeleted}</span><span class='stat-label'>Logs eliminados</span></div>";
+            html += $"<div class='stat-item time-ago'><span class='time-ago-text'>Última limpieza: {timeAgoText}</span></div>";
             html += "</div>";
             
             // Reemplazar botón con mensaje informativo
-            html += "<div class='info-message'>";
+            html += "<div class='info-message' style='margin-top: 15px;'>";
             html += "<p>La limpieza automática está habilitada con un intervalo de " + config.DataPruneIntervalHours + " horas.</p>";
             html += "</div>";
         }
@@ -1813,14 +1815,15 @@ public class HubbleController
             
             if (config.EnableDataPrune)
             {
-                html += "<p>La limpieza automática está habilitada y se ejecutará según la configuración.</p>";
                 html += "<div class='info-message'>";
-                html += "<p>La limpieza se ejecuta cada " + config.DataPruneIntervalHours + " horas.</p>";
+                html += "<p>La limpieza automática está habilitada y se ejecutará cada " + config.DataPruneIntervalHours + " horas.</p>";
                 html += "</div>";
             }
             else
             {
+                html += "<div class='info-message'>";
                 html += "<p>La limpieza automática está deshabilitada.</p>";
+                html += "</div>";
             }
         }
         html += "</div>";
@@ -1853,16 +1856,16 @@ public class HubbleController
         html += $"<div class='config-value'>{config.SystemInfo.DatabaseName}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
-        html += "<label>Conexión:</label>";
-        html += $"<div class='config-value system-info'>{config.SystemInfo.ConnectionString}</div>";
-        html += "</div>";
-        html += "<div class='config-group'>";
         html += "<label>MongoDB:</label>";
-        html += $"<div class='config-value'>{config.SystemInfo.MongoDBVersion}</div>";
+        html += $"<div class='config-value'>Driver {config.SystemInfo.MongoDBVersion}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Zona horaria:</label>";
         html += $"<div class='config-value'>{(string.IsNullOrEmpty(config.TimeZoneId) ? "UTC" : config.TimeZoneId)}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Diagnósticos:</label>";
+        html += $"<div class='config-value'>Activado</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Ruta base:</label>";
@@ -1919,12 +1922,19 @@ public class HubbleController
         html += "<h3>Configuración de captura</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group'>";
-        html += "<label>Capturar solicitudes HTTP:</label>";
-        html += $"<div class='config-value'>{(config.CaptureHttpRequests ? "Activado" : "Desactivado")}</div>";
+        html += "<label>Capturar solicitudes HTTP (HUBBLE_ENABLE_DIAGNOSTICS):</label>";
+        
+        // Obtener el valor directamente de la variable de entorno
+        var enableDiagnostics = Environment.GetEnvironmentVariable("HUBBLE_ENABLE_DIAGNOSTICS");
+        var isEnabledStr = !string.IsNullOrEmpty(enableDiagnostics) && 
+                          (enableDiagnostics.ToLower() == "true" || enableDiagnostics == "1") 
+                          ? "Activado" : "Desactivado";
+        
+        html += $"<div class='config-value'>{isEnabledStr}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
-        html += "<label>Capturar mensajes de ILogger:</label>";
-        html += $"<div class='config-value'>{(config.CaptureLoggerMessages ? "Activado" : "Desactivado")}</div>";
+        html += "<label>Capturar mensajes de ILogger (HUBBLE_CAPTURE_LOGGER_MESSAGES):</label>";
+        html += $"<div class='config-value'>Activado</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Nivel mínimo de log:</label>";
@@ -1941,19 +1951,33 @@ public class HubbleController
         html += "<h3>Rutas ignoradas</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group ignored-paths'>";
-        if (config.IgnorePaths != null && config.IgnorePaths.Count > 0)
+        
+        // Obtener las rutas ignoradas desde el servicio o mostrar el placeholder
+        var hubbleIgnorePaths = Environment.GetEnvironmentVariable("HUBBLE_IGNORE_PATHS");
+        if (!string.IsNullOrEmpty(hubbleIgnorePaths))
         {
-            html += "<ul class='ignored-paths-list'>";
-            foreach (var path in config.IgnorePaths)
+            var ignorePaths = hubbleIgnorePaths.Split(',').Select(p => p.Trim()).ToList();
+            
+            if (ignorePaths.Count > 0)
             {
-                html += $"<li>{path}</li>";
+                html += "<div class='config-value'>HUBBLE_IGNORE_PATHS:</div>";
+                html += "<ul class='ignored-paths-list'>";
+                foreach (var path in ignorePaths)
+                {
+                    html += $"<li>{path}</li>";
+                }
+                html += "</ul>";
             }
-            html += "</ul>";
+            else
+            {
+                html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS vacío).</div>";
+            }
         }
         else
         {
-            html += "<div class='config-value'>No hay rutas ignoradas configuradas.</div>";
+            html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS no definido).</div>";
         }
+        
         html += "</div>";
         html += "</div>";
         html += "<div class='info-message'>";
@@ -2007,6 +2031,8 @@ public class HubbleController
         html += ".ignored-paths-list { list-style-type: none; padding: 0; margin: 0; width: 100%; }";
         html += ".ignored-paths-list li { padding: 5px 0; border-bottom: 1px solid #333; color: #03dac6; font-family: 'Courier New', monospace; }";
         html += ".ignored-paths-list li:last-child { border-bottom: none; }";
+        html += ".time-ago-text { color: rgba(255, 255, 255, 0.7); font-style: italic; grid-column: span 2; }";
+        html += ".time-ago { grid-column: span 2; margin-top: 5px; }";
         html += "</style>";
         
         html += GenerateHtmlFooter();
