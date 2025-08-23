@@ -1,6 +1,7 @@
 namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Interfaces;
+using Gabonet.Hubble.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -17,18 +18,24 @@ public class HubbleController
     private readonly string _version;
     private readonly string _basePath;
     private readonly Middleware.HubbleOptions _options;
+    private readonly IHubbleStatsService? _statsService;
 
     /// <summary>
     /// Constructor del controlador de Hubble.
     /// </summary>
     /// <param name="hubbleService">Servicio de Hubble</param>
     /// <param name="options">Opciones de configuración de Hubble</param>
-    public HubbleController(IHubbleService hubbleService, Middleware.HubbleOptions options)
+    /// <param name="statsService">Servicio de estadísticas</param>
+    public HubbleController(
+        IHubbleService hubbleService, 
+        Middleware.HubbleOptions options,
+        IHubbleStatsService? statsService = null)
     {
         _hubbleService = hubbleService;
         _version = GetAssemblyVersion();
         _basePath = options.BasePath.TrimEnd('/');
         _options = options;
+        _statsService = statsService;
     }
 
     /// <summary>
@@ -130,6 +137,7 @@ public class HubbleController
         // {
         //     html += "<div class='live-indicator'>Actualización en tiempo real <span id='reload-counter'>3</span>s</div>";
         // }
+        html += $"<a href='{_basePath}/config' class='btn primary'>Configuración</a>";
         html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
@@ -694,7 +702,7 @@ public class HubbleController
         }
 
         // Logs relacionados (logs de ILogger asociados a esta solicitud)
-        var relatedLogs = await _hubbleService.GetRelatedLogsAsync(log.Id);
+        var relatedLogs = await _hubbleService.GetRelatedLogsAsync(log.Id ?? string.Empty);
         if (relatedLogs.Count > 0)
         {
             html += "<div class='card'>";
@@ -1714,5 +1722,509 @@ public class HubbleController
         {
             return json;
         }
+    }
+
+    /// <summary>
+    /// Muestra la página de configuración y estadísticas de Hubble
+    /// </summary>
+    /// <returns>HTML con la configuración y estadísticas</returns>
+    public async Task<string> GetConfigurationPageAsync()
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        HubbleStatistics stats = null;
+        HubbleSystemConfiguration config = null;
+        
+        try
+        {
+            stats = await _statsService.GetStatisticsAsync();
+            config = await _statsService.GetSystemConfigurationAsync();
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"No se pudo obtener las estadísticas o configuración: {ex.Message}");
+        }
+        
+        if (stats == null || config == null)
+        {
+            return GenerateErrorPage("Error", "No se pudieron cargar las estadísticas o la configuración");
+        }
+        
+        // Generar HTML (el resto del método queda igual)
+        var html = GenerateHtmlHeader("Hubble - Configuración", true);
+        
+        html += "<div class='container'>";
+        html += "<div class='header'>";
+        html += "<div class='header-left'>";
+        html += GetHubbleLogo();
+        html += "<p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>" + _version + "</span></p>";
+        html += "</div>";
+        
+        // Botones de navegación
+        html += "<div class='header-right'>";
+        html += $"<a href='{_basePath}' class='btn secondary'>Volver a logs</a>";
+        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += "</div>";
+        html += "</div>";
+        
+        // Contenido principal con dos columnas: estadísticas y configuración
+        html += "<div class='config-container'>";
+        
+        // Primera columna: Estadísticas
+        html += "<div class='config-column stats-column'>";
+        html += "<h2>Estadísticas</h2>";
+        
+        html += "<div class='stats-card'>";
+        html += "<h3>Resumen de logs</h3>";
+        html += "<div class='stats-grid'>";
+        html += $"<div class='stat-item'><span class='stat-value'>{stats.TotalLogs}</span><span class='stat-label'>Total de logs</span></div>";
+        html += $"<div class='stat-item'><span class='stat-value'>{stats.SuccessfulLogs}</span><span class='stat-label'>Logs exitosos (2xx)</span></div>";
+        html += $"<div class='stat-item'><span class='stat-value'>{stats.FailedLogs}</span><span class='stat-label'>Logs fallidos (4xx/5xx)</span></div>";
+        html += $"<div class='stat-item'><span class='stat-value'>{stats.LoggerLogs}</span><span class='stat-label'>Logs de ILogger</span></div>";
+        html += "</div>";
+        html += "</div>";
+        
+        // Información sobre el último prune
+        html += "<div class='stats-card'>";
+        html += "<h3>Limpieza de datos</h3>";
+        
+        if (stats.LastPrune.LastPruneDate.HasValue)
+        {
+            var lastPruneDate = stats.LastPrune.LastPruneDate.Value.ToLocalTime();
+            var timeAgo = DateTime.Now - lastPruneDate;
+            var timeAgoText = FormatTimeAgo(timeAgo);
+            
+            html += "<div class='stats-grid'>";
+            html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:dd/MM/yyyy}</span><span class='stat-label'>Fecha</span></div>";
+            html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:HH:mm:ss}</span><span class='stat-label'>Hora</span></div>";
+            html += $"<div class='stat-item'><span class='stat-value'>{stats.LastPrune.LogsDeleted}</span><span class='stat-label'>Logs eliminados</span></div>";
+            html += $"<div class='stat-item time-ago'><span class='time-ago-text'>Última limpieza: {timeAgoText}</span></div>";
+            html += "</div>";
+            
+            // Reemplazar botón con mensaje informativo
+            html += "<div class='info-message' style='margin-top: 15px;'>";
+            html += "<p>La limpieza automática está habilitada con un intervalo de " + config.DataPruneIntervalHours + " horas.</p>";
+            html += "</div>";
+        }
+        else
+        {
+            html += "<p>No se ha realizado ninguna limpieza automática de datos.</p>";
+            
+            if (config.EnableDataPrune)
+            {
+                html += "<div class='info-message'>";
+                html += "<p>La limpieza automática está habilitada y se ejecutará cada " + config.DataPruneIntervalHours + " horas.</p>";
+                html += "</div>";
+            }
+            else
+            {
+                html += "<div class='info-message'>";
+                html += "<p>La limpieza automática está deshabilitada.</p>";
+                html += "</div>";
+            }
+        }
+        html += "</div>";
+        
+        // Información de estadística sin botón de recalcular
+        html += "<div class='info-message stats-info'>";
+        html += "<p>Las estadísticas se actualizan automáticamente cada vez que se accede a esta página.</p>";
+        html += "</div>";
+        
+        html += "</div>"; // Fin de la primera columna
+        
+        // Segunda columna: Configuración del sistema
+        html += "<div class='config-column config-settings-column'>";
+        html += "<h2>Configuración del sistema</h2>";
+        
+        // Información del sistema
+        html += "<div class='stats-card'>";
+        html += "<h3>Información del sistema</h3>";
+        html += "<div class='config-form'>";
+        html += "<div class='config-group'>";
+        html += "<label>Servicio:</label>";
+        html += $"<div class='config-value'>{config.ServiceName}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Versión:</label>";
+        html += $"<div class='config-value'>{config.SystemInfo.Version}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Base de datos:</label>";
+        html += $"<div class='config-value'>{config.SystemInfo.DatabaseName}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>MongoDB:</label>";
+        html += $"<div class='config-value'>Driver {config.SystemInfo.MongoDBVersion}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Zona horaria:</label>";
+        html += $"<div class='config-value'>{(string.IsNullOrEmpty(config.TimeZoneId) ? "UTC" : config.TimeZoneId)}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Diagnósticos:</label>";
+        html += $"<div class='config-value'>Activado</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Ruta base:</label>";
+        html += $"<div class='config-value'>{_basePath}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Autenticación requerida:</label>";
+        html += $"<div class='config-value'>{(_options.RequireAuthentication ? "Sí" : "No")}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Resaltar nuevos servicios:</label>";
+        html += $"<div class='config-value'>{(_options.HighlightNewServices ? "Sí" : "No")}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Duración de resaltado (segundos):</label>";
+        html += $"<div class='config-value'>{_options.HighlightDurationSeconds}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Inicio del servicio:</label>";
+        
+        var startTime = config.SystemInfo.StartTime.ToLocalTime();
+        var uptime = DateTime.Now - startTime;
+        var uptimeText = FormatTimeAgo(uptime);
+        
+        html += $"<div class='config-value'>{startTime:dd/MM/yyyy HH:mm:ss} <span class='uptime'>({uptimeText})</span></div>";
+        html += "</div>";
+        html += "</div>";
+        html += "</div>";
+        
+        // Configuración de limpieza
+        html += "<div class='stats-card'>";
+        html += "<h3>Configuración de limpieza</h3>";
+        html += "<div class='config-form'>";
+        html += "<div class='config-group'>";
+        html += "<label>Habilitar limpieza automática:</label>";
+        html += $"<div class='config-value'>{(config.EnableDataPrune ? "Activado" : "Desactivado")}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Intervalo de limpieza (horas):</label>";
+        html += $"<div class='config-value'>{config.DataPruneIntervalHours}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Edad máxima de los logs (horas):</label>";
+        html += $"<div class='config-value'>{config.MaxLogAgeHours}</div>";
+        html += "</div>";
+        html += "</div>";
+        html += "<div class='info-message'>";
+        html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
+        html += "</div>";
+        html += "</div>";
+        
+        // Configuración de captura de datos
+        html += "<div class='stats-card'>";
+        html += "<h3>Configuración de captura</h3>";
+        html += "<div class='config-form'>";
+        html += "<div class='config-group'>";
+        html += "<label>Capturar solicitudes HTTP (HUBBLE_ENABLE_DIAGNOSTICS):</label>";
+        
+        // Obtener el valor directamente de la variable de entorno
+        var enableDiagnostics = Environment.GetEnvironmentVariable("HUBBLE_ENABLE_DIAGNOSTICS");
+        var isEnabledStr = !string.IsNullOrEmpty(enableDiagnostics) && 
+                          (enableDiagnostics.ToLower() == "true" || enableDiagnostics == "1") 
+                          ? "Activado" : "Desactivado";
+        
+        html += $"<div class='config-value'>{isEnabledStr}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Capturar mensajes de ILogger (HUBBLE_CAPTURE_LOGGER_MESSAGES):</label>";
+        html += $"<div class='config-value'>Activado</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Nivel mínimo de log:</label>";
+        html += $"<div class='config-value'>{config.MinimumLogLevel}</div>";
+        html += "</div>";
+        html += "</div>";
+        html += "<div class='info-message'>";
+        html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
+        html += "</div>";
+        html += "</div>";
+        
+        // Rutas ignoradas
+        html += "<div class='stats-card'>";
+        html += "<h3>Rutas ignoradas</h3>";
+        html += "<div class='config-form'>";
+        html += "<div class='config-group ignored-paths'>";
+        
+        // Obtener las rutas ignoradas desde el servicio o mostrar el placeholder
+        var hubbleIgnorePaths = Environment.GetEnvironmentVariable("HUBBLE_IGNORE_PATHS");
+        if (!string.IsNullOrEmpty(hubbleIgnorePaths))
+        {
+            var ignorePaths = hubbleIgnorePaths.Split(',').Select(p => p.Trim()).ToList();
+            
+            if (ignorePaths.Count > 0)
+            {
+                html += "<div class='config-value'>HUBBLE_IGNORE_PATHS:</div>";
+                html += "<ul class='ignored-paths-list'>";
+                foreach (var path in ignorePaths)
+                {
+                    html += $"<li>{path}</li>";
+                }
+                html += "</ul>";
+            }
+            else
+            {
+                html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS vacío).</div>";
+            }
+        }
+        else
+        {
+            html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS no definido).</div>";
+        }
+        
+        html += "</div>";
+        html += "</div>";
+        html += "<div class='info-message'>";
+        html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
+        html += "</div>";
+        html += "</div>";
+        
+        html += "</div>"; // Fin de la segunda columna
+        html += "</div>"; // Fin del contenedor de configuración
+        
+        html += "</div>"; // Fin del contenedor principal
+        
+        // Agregar estilos CSS específicos para la página de configuración
+        html += "<style>";
+        html += ".config-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }";
+        html += ".config-column { flex: 1; min-width: 300px; }";
+        html += ".stats-column, .config-settings-column { display: flex; flex-direction: column; gap: 20px; }";
+        html += ".stats-card { background: #1e1e1e; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); color: #ffffff; }";
+        html += ".stats-card h3 { margin-top: 0; color: #bb86fc; font-size: 18px; margin-bottom: 15px; }";
+        html += ".stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }";
+        html += ".stat-item { display: flex; flex-direction: column; }";
+        html += ".stat-value { font-size: 24px; font-weight: 600; color: #bb86fc; }";
+        html += ".stat-label { font-size: 14px; color: rgba(255, 255, 255, 0.7); margin-top: 5px; }";
+        html += ".action-buttons { margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; }";
+        html += ".config-form { display: flex; flex-direction: column; gap: 15px; }";
+        html += ".config-group { display: flex; justify-content: space-between; align-items: center; }";
+        html += ".config-value { font-family: 'Courier New', monospace; color: #03dac6; }";
+        html += ".system-info { word-break: break-all; max-width: 280px; }";
+        html += ".uptime { color: rgba(255, 255, 255, 0.6); font-style: italic; }";
+        html += ".switch { position: relative; display: inline-block; width: 60px; height: 30px; }";
+        html += ".switch input { opacity: 0; width: 0; height: 0; }";
+        html += ".slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .4s; border-radius: 30px; }";
+        html += ".slider:before { position: absolute; content: ''; height: 22px; width: 22px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }";
+        html += "input:checked + .slider { background-color: #6200ee; }";
+        html += "input:focus + .slider { box-shadow: 0 0 1px #6200ee; }";
+        html += "input:checked + .slider:before { transform: translateX(30px); }";
+        html += ".textarea-field { width: 100%; min-height: 100px; border: 1px solid #333; border-radius: 4px; padding: 8px; font-family: 'Courier New', monospace; background-color: #121212; color: white; }";
+        html += ".input-field { background-color: #121212; color: white; border: 1px solid #333; padding: 8px; border-radius: 4px; width: 100px; }";
+        html += ".select-field { background-color: #121212; color: white; border: 1px solid #333; padding: 8px; border-radius: 4px; min-width: 150px; }";
+        html += "h2 { color: #bb86fc; margin-bottom: 15px; font-size: 22px; }";
+        html += "p { color: rgba(255, 255, 255, 0.8); }";
+        html += "label { color: rgba(255, 255, 255, 0.8); }";
+        html += ".btn.primary { background-color: #6200ee; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }";
+        html += ".btn.secondary { background-color: transparent; color: #bb86fc; border: 1px solid #bb86fc; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }";
+        html += ".btn.primary:hover { background-color: #7a36f9; }";
+        html += ".btn.secondary:hover { background-color: rgba(187, 134, 252, 0.1); }";
+        html += ".info-message { background-color: rgba(98, 0, 238, 0.1); border-left: 3px solid #6200ee; padding: 10px; margin-top: 15px; border-radius: 0 4px 4px 0; }";
+        html += ".info-message p { color: rgba(255, 255, 255, 0.9); margin: 0; font-style: italic; }";
+        html += ".stats-info { background-color: rgba(3, 218, 198, 0.1); border-left: 3px solid #03dac6; margin: 20px auto; max-width: 800px; }";
+        html += ".ignored-paths { flex-direction: column; align-items: flex-start !important; }";
+        html += ".ignored-paths-list { list-style-type: none; padding: 0; margin: 0; width: 100%; }";
+        html += ".ignored-paths-list li { padding: 5px 0; border-bottom: 1px solid #333; color: #03dac6; font-family: 'Courier New', monospace; }";
+        html += ".ignored-paths-list li:last-child { border-bottom: none; }";
+        html += ".time-ago-text { color: rgba(255, 255, 255, 0.7); font-style: italic; grid-column: span 2; }";
+        html += ".time-ago { grid-column: span 2; margin-top: 5px; }";
+        html += "</style>";
+        
+        html += GenerateHtmlFooter();
+        
+        return html;
+    }
+    
+    /// <summary>
+    /// Ejecuta una limpieza manual de datos antiguos
+    /// </summary>
+    /// <returns>Redirección a la página de configuración</returns>
+    public async Task<string> RunManualPruneAsync()
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        try
+        {
+            var config = await _statsService.GetSystemConfigurationAsync();
+            var maxAgeHours = config.MaxLogAgeHours > 0 ? config.MaxLogAgeHours : 24;
+            var cutoffDate = DateTime.UtcNow.AddHours(-maxAgeHours);
+            
+            var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
+            await _statsService.UpdatePruneStatisticsAsync(DateTime.UtcNow, logsDeleted);
+            
+            return $"<script>alert('Limpieza manual completada. Se eliminaron {logsDeleted} logs.'); window.location.href='{_basePath}/config';</script>";
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"Error al ejecutar la limpieza manual: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Recalcula las estadísticas del sistema
+    /// </summary>
+    /// <returns>Redirección a la página de configuración</returns>
+    public async Task<string> RecalculateStatisticsAsync()
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        try
+        {
+            await _statsService.RecalculateStatisticsAsync();
+            return $"<script>alert('Estadísticas recalculadas correctamente.'); window.location.href='{_basePath}/config';</script>";
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"Error al recalcular las estadísticas: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Guarda la configuración de limpieza de datos
+    /// </summary>
+    /// <param name="enableDataPrune">Indica si se debe habilitar la limpieza automática</param>
+    /// <param name="dataPruneIntervalHours">Intervalo de limpieza en horas</param>
+    /// <param name="maxLogAgeHours">Edad máxima de los logs en horas</param>
+    /// <returns>Redirección a la página de configuración</returns>
+    public async Task<string> SavePruneConfigAsync(bool enableDataPrune, int dataPruneIntervalHours, int maxLogAgeHours)
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        try
+        {
+            var config = await _statsService.GetSystemConfigurationAsync();
+            
+            config.EnableDataPrune = enableDataPrune;
+            config.DataPruneIntervalHours = Math.Max(1, Math.Min(168, dataPruneIntervalHours)); // Entre 1 y 168 horas
+            config.MaxLogAgeHours = Math.Max(1, Math.Min(8760, maxLogAgeHours)); // Entre 1 hora y 1 año
+            
+            await _statsService.SaveSystemConfigurationAsync(config);
+            
+            return $"<script>alert('Configuración guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"Error al guardar la configuración: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Guarda la configuración de captura de datos
+    /// </summary>
+    /// <param name="captureHttpRequests">Indica si se deben capturar solicitudes HTTP</param>
+    /// <param name="captureLoggerMessages">Indica si se deben capturar mensajes de ILogger</param>
+    /// <param name="minimumLogLevel">Nivel mínimo de log a capturar</param>
+    /// <returns>Redirección a la página de configuración</returns>
+    public async Task<string> SaveCaptureConfigAsync(bool captureHttpRequests, bool captureLoggerMessages, string minimumLogLevel)
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        try
+        {
+            var config = await _statsService.GetSystemConfigurationAsync();
+            
+            config.CaptureHttpRequests = captureHttpRequests;
+            config.CaptureLoggerMessages = captureLoggerMessages;
+            config.MinimumLogLevel = minimumLogLevel;
+            
+            await _statsService.SaveSystemConfigurationAsync(config);
+            
+            return $"<script>alert('Configuración de captura guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"Error al guardar la configuración de captura: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Guarda la configuración de rutas ignoradas
+    /// </summary>
+    /// <param name="ignorePaths">Rutas a ignorar (una por línea)</param>
+    /// <returns>Redirección a la página de configuración</returns>
+    public async Task<string> SaveIgnorePathsAsync(string ignorePaths)
+    {
+        if (_statsService == null)
+        {
+            return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
+        }
+        
+        try
+        {
+            var config = await _statsService.GetSystemConfigurationAsync();
+            
+            // Convertir el texto a una lista de rutas (eliminar líneas vacías)
+            var paths = ignorePaths.Split('\n')
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .ToList();
+            
+            config.IgnorePaths = paths;
+            
+            await _statsService.SaveSystemConfigurationAsync(config);
+            
+            return $"<script>alert('Configuración de rutas ignoradas guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+        }
+        catch (Exception ex)
+        {
+            return GenerateErrorPage("Error", $"Error al guardar las rutas ignoradas: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Formatea un intervalo de tiempo en formato legible
+    /// </summary>
+    /// <param name="timeSpan">Intervalo de tiempo</param>
+    /// <returns>Texto formateado</returns>
+    private string FormatTimeAgo(TimeSpan timeSpan)
+    {
+        if (timeSpan.TotalDays > 365)
+        {
+            var years = (int)(timeSpan.TotalDays / 365);
+            return years == 1 ? "hace 1 año" : $"hace {years} años";
+        }
+        
+        if (timeSpan.TotalDays > 30)
+        {
+            var months = (int)(timeSpan.TotalDays / 30);
+            return months == 1 ? "hace 1 mes" : $"hace {months} meses";
+        }
+        
+        if (timeSpan.TotalDays >= 1)
+        {
+            var days = (int)timeSpan.TotalDays;
+            return days == 1 ? "hace 1 día" : $"hace {days} días";
+        }
+        
+        if (timeSpan.TotalHours >= 1)
+        {
+            var hours = (int)timeSpan.TotalHours;
+            return hours == 1 ? "hace 1 hora" : $"hace {hours} horas";
+        }
+        
+        if (timeSpan.TotalMinutes >= 1)
+        {
+            var minutes = (int)timeSpan.TotalMinutes;
+            return minutes == 1 ? "hace 1 minuto" : $"hace {minutes} minutos";
+        }
+        
+        return "hace unos segundos";
     }
 }

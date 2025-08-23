@@ -61,7 +61,8 @@ public static class ServiceCollectionExtensions
             // Por defecto, no destacar nuevos servicios
             HighlightNewServices = false,
             HighlightDurationSeconds = 5,
-            IgnorePaths = new List<string>()
+            IgnorePaths = new List<string>(),
+            TimeZoneId = timeZoneId ?? string.Empty
         });
 
         return services;
@@ -97,18 +98,8 @@ public static class ServiceCollectionExtensions
         // Registrar el acceso al contexto HTTP
         services.AddHttpContextAccessor();
 
-        // Registrar el servicio de Hubble
-        services.AddScoped<IHubbleService>(provider =>
-        {
-            var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
-            return new HubbleService(mongoClient, config.DatabaseName, httpContextAccessor, config.ServiceName, config.TimeZoneId);
-        });
-
-        // Registrar el controlador de Hubble
-        services.AddTransient<HubbleController>();
-
         // Registrar las opciones
-        services.AddSingleton(new HubbleOptions
+        var options = new HubbleOptions
         {
             ServiceName = config.ServiceName,
             EnableDiagnostics = config.EnableDiagnostics,
@@ -120,8 +111,38 @@ public static class ServiceCollectionExtensions
             BasePath = config.BasePath,
             HighlightNewServices = config.HighlightNewServices,
             HighlightDurationSeconds = config.HighlightDurationSeconds,
-            IgnorePaths = config.IgnorePaths ?? new List<string>()
+            IgnorePaths = config.IgnorePaths ?? new List<string>(),
+            EnableDataPrune = config.EnableDataPrune,
+            DataPruneIntervalHours = config.DataPruneIntervalHours,
+            MaxLogAgeHours = config.MaxLogAgeHours,
+            TimeZoneId = config.TimeZoneId
+        };
+        
+        services.AddSingleton(options);
+
+        // Registrar el servicio de Hubble
+        services.AddScoped<IHubbleService>(provider =>
+        {
+            var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
+            return new HubbleService(mongoClient, config.DatabaseName, httpContextAccessor, config.ServiceName, config.TimeZoneId);
         });
+        
+        // Registrar el servicio de estadísticas de Hubble
+        services.AddSingleton<IHubbleStatsService>(provider =>
+        {
+            var logger = provider.GetRequiredService<ILogger<HubbleStatsService>>();
+            return new HubbleStatsService(mongoClient, config.DatabaseName, options, logger);
+        });
+
+        // Registrar el controlador de Hubble
+        services.AddTransient<HubbleController>();
+        
+        // Registrar el servicio de limpieza de datos si está habilitado
+        if (config.EnableDataPrune)
+        {
+            services.AddHostedService<BackgroundServices.DataPruneService>();
+            Console.WriteLine($"[Hubble] Servicio de limpieza automática habilitado (Intervalo: {config.DataPruneIntervalHours}h, Max. edad: {config.MaxLogAgeHours}h)");
+        }
 
         return services;
     }
@@ -133,12 +154,28 @@ public static class ServiceCollectionExtensions
     /// <returns>Constructor de aplicaciones con Hubble configurado</returns>
     public static IApplicationBuilder UseHubble(this IApplicationBuilder app)
     {
+        Console.WriteLine($"[Hubble] Iniciando middleware...");
+        
+        // Obtener las opciones configuradas
+        var options = app.ApplicationServices.GetService<HubbleOptions>();
+        if (options != null)
+        {
+            Console.WriteLine($"[Hubble] Servicio: {options.ServiceName}");
+            Console.WriteLine($"[Hubble] Interfaz web disponible en: {options.BasePath}");
+            
+            if (options.RequireAuthentication)
+            {
+                Console.WriteLine($"[Hubble] Autenticación habilitada para acceder a la interfaz");
+            }
+        }
+        
         // Agregar el middleware de Hubble
         app.UseMiddleware<HubbleMiddleware>();
 
         // Agregar el middleware para la interfaz de usuario de Hubble
         app.UseMiddleware<HubbleUIMiddleware>();
 
+        Console.WriteLine($"[Hubble] Middleware configurado correctamente");
         return app;
     }
 
@@ -149,7 +186,7 @@ public static class ServiceCollectionExtensions
     /// <param name="minimumLevel">Nivel mínimo de log a capturar</param>
     /// <returns>Constructor de logging con Hubble configurado</returns>
     public static ILoggingBuilder AddHubbleLogging(this ILoggingBuilder builder, LogLevel minimumLevel = LogLevel.Information)
-    {
+    {        
         // En lugar de intentar resolver IHubbleService directamente, que es un servicio scoped,
         // creamos una factory que resuelve el servicio cuando se necesita, evitando el error
         // "Cannot resolve scoped service from root provider"
@@ -244,4 +281,19 @@ public class HubbleConfiguration
     /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
+    
+    /// <summary>
+    /// Activa o desactiva el sistema de limpieza automática de logs antiguos
+    /// </summary>
+    public bool EnableDataPrune { get; set; } = false;
+    
+    /// <summary>
+    /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs
+    /// </summary>
+    public int DataPruneIntervalHours { get; set; } = 1;
+    
+    /// <summary>
+    /// Edad máxima en horas que se conservarán los logs antes de ser eliminados
+    /// </summary>
+    public int MaxLogAgeHours { get; set; } = 24;
 } 

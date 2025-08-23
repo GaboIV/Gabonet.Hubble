@@ -32,63 +32,91 @@ public class HubbleUIMiddleware
     /// <returns>Tarea asíncrona</returns>
     public async Task InvokeAsync(HttpContext context, HubbleOptions options)
     {
-        var path = context.Request.Path.Value?.ToLower();
         var basePath = options.BasePath.ToLower();
-
-        if (string.IsNullOrEmpty(path))
+        var path = context.Request.Path.Value?.ToLower() ?? "";
+        
+        // Solo procesar solicitudes que empiecen con la ruta base de Hubble
+        if (!path.StartsWith(basePath))
         {
             await _next(context);
             return;
         }
 
-        // Verificar si la ruta es para la interfaz de usuario de Hubble
-        if (path.StartsWith(basePath))
+        // Verificar autenticación si está habilitada
+        if (options.RequireAuthentication && !IsAuthenticated(context, options))
         {
-            // Si se requiere autenticación, verificar que las credenciales sean correctas
-            if (options.RequireAuthentication && !IsAuthenticated(context, options))
+            if (path.Equals($"{basePath}/login", StringComparison.OrdinalIgnoreCase) && 
+                context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
             {
-                // Si es una solicitud de inicio de sesión, verificar las credenciales
-                if (path == $"{basePath}/login" && context.Request.Method == "POST")
-                {
-                    await HandleLoginAsync(context, options);
-                    return;
-                }
-                
-                // Si la solicitud no está autenticada, mostrar el formulario de inicio de sesión
+                await HandleLoginAsync(context, options);
+            }
+            else
+            {
                 await ShowLoginFormAsync(context);
-                return;
             }
-
-            // Si está autenticado o no se requiere autenticación, procesar la solicitud
-            if (path == basePath || path == $"{basePath}/")
-            {
-                await HandleHubbleHomeAsync(context);
-                return;
-            }
-            else if (path.StartsWith($"{basePath}/detail/"))
-            {
-                await HandleHubbleDetailAsync(context);
-                return;
-            }
-            else if (path == $"{basePath}/delete-all")
-            {
-                await HandleHubbleDeleteAllAsync(context);
-                return;
-            }
-            else if (path.StartsWith($"{basePath}/api/"))
-            {
-                await HandleHubbleApiAsync(context);
-                return;
-            }
-            else if (path == $"{basePath}/logout" && options.RequireAuthentication)
-            {
-                await HandleLogoutAsync(context);
-                return;
-            }
+            return;
         }
 
-        // Si no es una ruta de Hubble, continuar con el siguiente middleware
-        await _next(context);
+        // Manejar diferentes rutas
+        if (path.Equals(basePath, StringComparison.OrdinalIgnoreCase) || 
+            path.Equals($"{basePath}/", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleHubbleHomeAsync(context);
+        }
+        else if (path.StartsWith($"{basePath}/detail/", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleHubbleDetailAsync(context);
+        }
+        else if (path.Equals($"{basePath}/delete-all", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleHubbleDeleteAllAsync(context);
+        }
+        else if (path.StartsWith($"{basePath}/api/", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleHubbleApiAsync(context);
+        }
+        else if (path.Equals($"{basePath}/logout", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleLogoutAsync(context);
+        }
+        // Nueva ruta para la página de configuración y estadísticas
+        else if (path.Equals($"{basePath}/config", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleConfigPageAsync(context);
+        }
+        // Ruta para ejecutar limpieza manual
+        else if (path.Equals($"{basePath}/run-prune", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleRunPruneAsync(context);
+        }
+        // Ruta para recalcular estadísticas
+        else if (path.Equals($"{basePath}/recalculate-stats", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleRecalculateStatsAsync(context);
+        }
+        // Ruta para guardar configuración de prune
+        else if (path.Equals($"{basePath}/save-config", StringComparison.OrdinalIgnoreCase) && 
+                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleSavePruneConfigAsync(context);
+        }
+        // Ruta para guardar configuración de captura
+        else if (path.Equals($"{basePath}/save-capture-config", StringComparison.OrdinalIgnoreCase) && 
+                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleSaveCaptureConfigAsync(context);
+        }
+        // Ruta para guardar rutas ignoradas
+        else if (path.Equals($"{basePath}/save-ignore-paths", StringComparison.OrdinalIgnoreCase) && 
+                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleSaveIgnorePathsAsync(context);
+        }
+        else
+        {
+            // Para cualquier otra ruta, continuar con el siguiente middleware
+            await _next(context);
+        }
     }
 
     private async Task HandleHubbleHomeAsync(HttpContext context)
@@ -461,5 +489,84 @@ public class HubbleUIMiddleware
         {
             return false;
         }
+    }
+    
+    private async Task HandleConfigPageAsync(HttpContext context)
+    {
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.GetConfigurationPageAsync();
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
+    }
+    
+    private async Task HandleRunPruneAsync(HttpContext context)
+    {
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.RunManualPruneAsync();
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
+    }
+    
+    private async Task HandleRecalculateStatsAsync(HttpContext context)
+    {
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.RecalculateStatisticsAsync();
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
+    }
+    
+    private async Task HandleSavePruneConfigAsync(HttpContext context)
+    {
+        // Obtener los valores del formulario
+        var form = await context.Request.ReadFormAsync();
+        bool enableDataPrune = form.ContainsKey("enableDataPrune");
+        
+        // Intentar parsear los valores numéricos
+        if (!int.TryParse(form["dataPruneIntervalHours"], out int dataPruneIntervalHours))
+        {
+            dataPruneIntervalHours = 1; // Valor por defecto
+        }
+        
+        if (!int.TryParse(form["maxLogAgeHours"], out int maxLogAgeHours))
+        {
+            maxLogAgeHours = 24; // Valor por defecto
+        }
+        
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.SavePruneConfigAsync(enableDataPrune, dataPruneIntervalHours, maxLogAgeHours);
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
+    }
+    
+    private async Task HandleSaveCaptureConfigAsync(HttpContext context)
+    {
+        // Obtener los valores del formulario
+        var form = await context.Request.ReadFormAsync();
+        bool captureHttpRequests = form.ContainsKey("captureHttpRequests");
+        bool captureLoggerMessages = form.ContainsKey("captureLoggerMessages");
+        string minimumLogLevel = form["minimumLogLevel"].ToString() ?? "Information";
+        
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.SaveCaptureConfigAsync(captureHttpRequests, captureLoggerMessages, minimumLogLevel);
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
+    }
+    
+    private async Task HandleSaveIgnorePathsAsync(HttpContext context)
+    {
+        // Obtener los valores del formulario
+        var form = await context.Request.ReadFormAsync();
+        string ignorePaths = form["ignorePaths"].ToString() ?? string.Empty;
+        
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.SaveIgnorePathsAsync(ignorePaths);
+        
+        context.Response.ContentType = "text/html";
+        await context.Response.WriteAsync(html);
     }
 } 
