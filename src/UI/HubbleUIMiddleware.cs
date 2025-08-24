@@ -1,9 +1,12 @@
 namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Middleware;
+using Gabonet.Hubble.UI.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json;
 using System;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -198,9 +201,218 @@ public class HubbleUIMiddleware
 
     private async Task HandleHubbleApiAsync(HttpContext context)
     {
-        // Aquí se pueden implementar endpoints API para Hubble si es necesario
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync("{\"message\": \"API de Hubble no implementada\"}");
+        try
+        {
+            var path = context.Request.Path.Value?.ToLower() ?? "";
+            var method = context.Request.Method.ToUpper();
+            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+
+            context.Response.ContentType = "application/json";
+
+            // Extract the API path after /api/
+            var basePath = context.RequestServices.GetRequiredService<HubbleOptions>().BasePath.ToLower();
+            var apiPath = path.Substring($"{basePath}/api".Length);
+
+            switch (method)
+            {
+                case "GET":
+                    await HandleGetApiAsync(context, apiPath, hubbleController);
+                    break;
+                case "POST":
+                    await HandlePostApiAsync(context, apiPath, hubbleController);
+                    break;
+                case "DELETE":
+                    await HandleDeleteApiAsync(context, apiPath, hubbleController);
+                    break;
+                default:
+                    context.Response.StatusCode = 405; // Method Not Allowed
+                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                    {
+                        Success = false,
+                        Message = $"HTTP method {method} is not supported"
+                    }));
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+            {
+                Success = false,
+                Message = $"Internal server error: {ex.Message}"
+            }));
+        }
+    }
+
+    private async Task HandleGetApiAsync(HttpContext context, string apiPath, HubbleController controller)
+    {
+        switch (apiPath)
+        {
+            case "/logs":
+                // GET /api/logs - Get logs with filtering and pagination
+                var method = context.Request.Query["method"].ToString();
+                var url = context.Request.Query["url"].ToString();
+                var statusGroup = context.Request.Query["statusGroup"].ToString();
+                var logType = context.Request.Query["logType"].ToString();
+                var pageStr = context.Request.Query["page"].ToString();
+                var pageSizeStr = context.Request.Query["pageSize"].ToString();
+
+                int page = 1;
+                int pageSize = 50;
+
+                if (!string.IsNullOrEmpty(pageStr) && int.TryParse(pageStr, out int parsedPage))
+                {
+                    page = parsedPage;
+                }
+
+                if (!string.IsNullOrEmpty(pageSizeStr) && int.TryParse(pageSizeStr, out int parsedPageSize))
+                {
+                    pageSize = parsedPageSize;
+                }
+
+                var logsResponse = await controller.GetLogsApiAsync(method, url, statusGroup, logType, page, pageSize);
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(logsResponse));
+                break;
+
+            case var logDetailPath when logDetailPath.StartsWith("/logs/"):
+                // GET /api/logs/{id} - Get log details
+                var logId = logDetailPath.Substring("/logs/".Length);
+                var logDetailResponse = await controller.GetLogDetailApiAsync(logId);
+                
+                if (!logDetailResponse.Found)
+                {
+                    context.Response.StatusCode = 404;
+                }
+                
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(logDetailResponse));
+                break;
+
+            case "/config":
+                // GET /api/config - Get configuration and statistics
+                var configResponse = await controller.GetConfigurationApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(configResponse));
+                break;
+
+            case "/prune":
+                // GET /api/prune - Run manual prune operation
+                var pruneResponse = await controller.RunManualPruneApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(pruneResponse));
+                break;
+
+            case "/recalculate-stats":
+                // GET /api/recalculate-stats - Recalculate statistics
+                var recalcResponse = await controller.RecalculateStatisticsApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(recalcResponse));
+                break;
+
+            default:
+                context.Response.StatusCode = 404;
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                {
+                    Success = false,
+                    Message = $"API endpoint not found: {apiPath}"
+                }));
+                break;
+        }
+    }
+
+    private async Task HandlePostApiAsync(HttpContext context, string apiPath, HubbleController controller)
+    {
+        // Read request body
+        string requestBody;
+        using (var reader = new StreamReader(context.Request.Body))
+        {
+            requestBody = await reader.ReadToEndAsync();
+        }
+
+        switch (apiPath)
+        {
+            case "/config/prune":
+                // POST /api/config/prune - Save prune configuration
+                var pruneRequest = JsonConvert.DeserializeObject<SavePruneConfigRequest>(requestBody);
+                if (pruneRequest == null)
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                    {
+                        Success = false,
+                        Message = "Invalid request body"
+                    }));
+                    return;
+                }
+
+                var pruneResponse = await controller.SavePruneConfigApiAsync(pruneRequest);
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(pruneResponse));
+                break;
+
+            case "/config/capture":
+                // POST /api/config/capture - Save capture configuration
+                var captureRequest = JsonConvert.DeserializeObject<SaveCaptureConfigRequest>(requestBody);
+                if (captureRequest == null)
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                    {
+                        Success = false,
+                        Message = "Invalid request body"
+                    }));
+                    return;
+                }
+
+                var captureResponse = await controller.SaveCaptureConfigApiAsync(captureRequest);
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(captureResponse));
+                break;
+
+            case "/config/ignore-paths":
+                // POST /api/config/ignore-paths - Save ignore paths configuration
+                var ignoreRequest = JsonConvert.DeserializeObject<SaveIgnorePathsRequest>(requestBody);
+                if (ignoreRequest == null)
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                    {
+                        Success = false,
+                        Message = "Invalid request body"
+                    }));
+                    return;
+                }
+
+                var ignoreResponse = await controller.SaveIgnorePathsApiAsync(ignoreRequest);
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(ignoreResponse));
+                break;
+
+            default:
+                context.Response.StatusCode = 404;
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                {
+                    Success = false,
+                    Message = $"API endpoint not found: {apiPath}"
+                }));
+                break;
+        }
+    }
+
+    private async Task HandleDeleteApiAsync(HttpContext context, string apiPath, HubbleController controller)
+    {
+        switch (apiPath)
+        {
+            case "/logs":
+                // DELETE /api/logs - Delete all logs
+                var deleteResponse = await controller.DeleteAllLogsApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(deleteResponse));
+                break;
+
+            default:
+                context.Response.StatusCode = 404;
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                {
+                    Success = false,
+                    Message = $"API endpoint not found: {apiPath}"
+                }));
+                break;
+        }
     }
 
     private async Task HandleLoginAsync(HttpContext context, HubbleOptions options)

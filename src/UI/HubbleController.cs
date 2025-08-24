@@ -2,6 +2,7 @@ namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Interfaces;
 using Gabonet.Hubble.Models;
+using Gabonet.Hubble.UI.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -2227,4 +2228,413 @@ public class HubbleController
         
         return "hace unos segundos";
     }
+
+    #region API JSON Methods
+
+    /// <summary>
+    /// Gets logs in JSON format with filtering and pagination
+    /// </summary>
+    /// <param name="method">HTTP method filter</param>
+    /// <param name="url">URL filter</param>
+    /// <param name="statusGroup">Status code group filter (200, 400, 500)</param>
+    /// <param name="logType">Log type filter (ApplicationLogger, HTTP)</param>
+    /// <param name="page">Page number</param>
+    /// <param name="pageSize">Page size</param>
+    /// <returns>JSON response with logs and pagination info</returns>
+    public async Task<LogsApiResponse> GetLogsApiAsync(
+        string? method = null,
+        string? url = null,
+        string? statusGroup = null,
+        string? logType = null,
+        int page = 1,
+        int pageSize = 50)
+    {
+        try
+        {
+            // Default to exclude related logs unless explicitly requesting ApplicationLogger logs
+            bool excludeRelatedLogs = string.IsNullOrEmpty(logType) || logType != "ApplicationLogger";
+
+            // Get total count before applying pagination
+            var totalCount = await _hubbleService.GetTotalLogsCountAsync(method, url, excludeRelatedLogs);
+
+            // Get logs for current page
+            var logs = await _hubbleService.GetFilteredLogsWithRelatedAsync(method, url, excludeRelatedLogs, page, pageSize);
+
+            // Filter by status code group if specified
+            if (!string.IsNullOrEmpty(statusGroup) && int.TryParse(statusGroup, out int statusBase))
+            {
+                logs = logs.Where(log => log.StatusCode >= statusBase && log.StatusCode < statusBase + 100).ToList();
+            }
+
+            // Filter by log type if explicitly specified
+            if (!string.IsNullOrEmpty(logType))
+            {
+                if (logType == "ApplicationLogger")
+                {
+                    logs = logs.Where(log => log.ControllerName == "ApplicationLogger").ToList();
+                }
+                else if (logType == "HTTP")
+                {
+                    logs = logs.Where(log => log.ControllerName != "ApplicationLogger").ToList();
+                }
+            }
+
+            var totalPages = (int)Math.Ceiling((double)totalCount / pageSize);
+
+            return new LogsApiResponse
+            {
+                Logs = logs,
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages,
+                HasNextPage = page < totalPages,
+                HasPreviousPage = page > 1
+            };
+        }
+        catch (Exception ex)
+        {
+            return new LogsApiResponse
+            {
+                Logs = new List<GeneralLog>(),
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = 0,
+                TotalPages = 0,
+                HasNextPage = false,
+                HasPreviousPage = false
+            };
+        }
+    }
+
+    /// <summary>
+    /// Gets a specific log by ID in JSON format
+    /// </summary>
+    /// <param name="id">Log ID</param>
+    /// <returns>JSON response with log details and related logs</returns>
+    public async Task<LogDetailApiResponse> GetLogDetailApiAsync(string id)
+    {
+        try
+        {
+            var log = await _hubbleService.GetLogByIdAsync(id);
+            
+            if (log == null)
+            {
+                return new LogDetailApiResponse
+                {
+                    Found = false,
+                    Log = null,
+                    RelatedLogs = new List<GeneralLog>()
+                };
+            }
+
+            var relatedLogs = new List<GeneralLog>();
+
+            // Get related logs if this is an HTTP request log
+            if (!string.IsNullOrEmpty(log.RelatedRequestId) && log.ControllerName != "ApplicationLogger")
+            {
+                relatedLogs = await _hubbleService.GetRelatedLogsAsync(log.RelatedRequestId);
+                relatedLogs = relatedLogs.Where(rl => rl.Id != log.Id).ToList();
+            }
+
+            return new LogDetailApiResponse
+            {
+                Found = true,
+                Log = log,
+                RelatedLogs = relatedLogs
+            };
+        }
+        catch (Exception)
+        {
+            return new LogDetailApiResponse
+            {
+                Found = false,
+                Log = null,
+                RelatedLogs = new List<GeneralLog>()
+            };
+        }
+    }
+
+    /// <summary>
+    /// Deletes all logs and returns JSON response
+    /// </summary>
+    /// <returns>JSON response indicating success</returns>
+    public async Task<DeleteApiResponse> DeleteAllLogsApiAsync()
+    {
+        try
+        {
+            // Get count before deleting
+            var deletedCount = await _hubbleService.GetTotalLogsCountAsync();
+            await _hubbleService.DeleteAllLogsAsync();
+            
+            return new DeleteApiResponse
+            {
+                Success = true,
+                Message = "All logs have been deleted successfully",
+                DeletedCount = deletedCount
+            };
+        }
+        catch (Exception ex)
+        {
+            return new DeleteApiResponse
+            {
+                Success = false,
+                Message = $"Error deleting logs: {ex.Message}",
+                DeletedCount = 0
+            };
+        }
+    }
+
+    /// <summary>
+    /// Gets configuration and statistics in JSON format
+    /// </summary>
+    /// <returns>JSON response with configuration and statistics</returns>
+    public async Task<ConfigApiResponse> GetConfigurationApiAsync()
+    {
+        try
+        {
+            var response = new ConfigApiResponse
+            {
+                Options = new HubbleOptionsDto
+                {
+                    BasePath = _basePath,
+                    ServiceName = _options.ServiceName,
+                    CaptureHttpRequests = _options.CaptureHttpRequests,
+                    CaptureLoggerMessages = _options.CaptureLoggerMessages,
+                    IgnorePaths = _options.IgnorePaths?.ToList() ?? new List<string>(),
+                    Version = _version
+                }
+            };
+
+            if (_statsService != null)
+            {
+                response.Statistics = await _statsService.GetStatisticsAsync();
+                response.Configuration = await _statsService.GetSystemConfigurationAsync();
+            }
+
+            return response;
+        }
+        catch (Exception)
+        {
+            return new ConfigApiResponse
+            {
+                Statistics = null,
+                Configuration = null,
+                Options = new HubbleOptionsDto
+                {
+                    BasePath = _basePath,
+                    ServiceName = _options.ServiceName,
+                    CaptureHttpRequests = _options.CaptureHttpRequests,
+                    CaptureLoggerMessages = _options.CaptureLoggerMessages,
+                    IgnorePaths = _options.IgnorePaths?.ToList() ?? new List<string>(),
+                    Version = _version
+                }
+            };
+        }
+    }
+
+    /// <summary>
+    /// Runs manual prune operation and returns JSON response
+    /// </summary>
+    /// <returns>JSON response with prune results</returns>
+    public async Task<PruneApiResponse> RunManualPruneApiAsync()
+    {
+        try
+        {
+            if (_statsService == null)
+            {
+                return new PruneApiResponse
+                {
+                    Success = false,
+                    Message = "Statistics service is not available",
+                    PrunedCount = 0,
+                    CutoffDate = DateTime.UtcNow
+                };
+            }
+
+            var config = await _statsService.GetSystemConfigurationAsync();
+            var maxAgeHours = config.MaxLogAgeHours > 0 ? config.MaxLogAgeHours : 24;
+            var cutoffDate = DateTime.UtcNow.AddHours(-maxAgeHours);
+
+            var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
+            await _statsService.UpdatePruneStatisticsAsync(DateTime.UtcNow, logsDeleted);
+
+            return new PruneApiResponse
+            {
+                Success = true,
+                Message = $"Manual prune completed successfully. {logsDeleted} logs were deleted.",
+                PrunedCount = logsDeleted,
+                CutoffDate = cutoffDate
+            };
+        }
+        catch (Exception ex)
+        {
+            return new PruneApiResponse
+            {
+                Success = false,
+                Message = $"Error running manual prune: {ex.Message}",
+                PrunedCount = 0,
+                CutoffDate = DateTime.UtcNow
+            };
+        }
+    }
+
+    /// <summary>
+    /// Recalculates statistics and returns JSON response
+    /// </summary>
+    /// <returns>JSON response indicating success</returns>
+    public async Task<ApiResponse> RecalculateStatisticsApiAsync()
+    {
+        try
+        {
+            if (_statsService == null)
+            {
+                return new ApiResponse
+                {
+                    Success = false,
+                    Message = "Statistics service is not available"
+                };
+            }
+
+            await _statsService.RecalculateStatisticsAsync();
+
+            return new ApiResponse
+            {
+                Success = true,
+                Message = "Statistics recalculated successfully"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ApiResponse
+            {
+                Success = false,
+                Message = $"Error recalculating statistics: {ex.Message}"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Saves prune configuration and returns JSON response
+    /// </summary>
+    /// <param name="request">Prune configuration request</param>
+    /// <returns>JSON response indicating success</returns>
+    public async Task<ApiResponse> SavePruneConfigApiAsync(SavePruneConfigRequest request)
+    {
+        try
+        {
+            if (_statsService == null)
+            {
+                return new ApiResponse
+                {
+                    Success = false,
+                    Message = "Statistics service is not available"
+                };
+            }
+
+            var config = await _statsService.GetSystemConfigurationAsync();
+
+            config.EnableDataPrune = request.EnableDataPrune;
+            config.DataPruneIntervalHours = Math.Max(1, Math.Min(168, request.DataPruneIntervalHours)); // Between 1 and 168 hours
+            config.MaxLogAgeHours = Math.Max(1, Math.Min(8760, request.MaxLogAgeHours)); // Between 1 hour and 1 year
+
+            await _statsService.SaveSystemConfigurationAsync(config);
+
+            return new ApiResponse
+            {
+                Success = true,
+                Message = "Prune configuration saved successfully"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ApiResponse
+            {
+                Success = false,
+                Message = $"Error saving prune configuration: {ex.Message}"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Saves capture configuration and returns JSON response
+    /// </summary>
+    /// <param name="request">Capture configuration request</param>
+    /// <returns>JSON response indicating success</returns>
+    public async Task<ApiResponse> SaveCaptureConfigApiAsync(SaveCaptureConfigRequest request)
+    {
+        try
+        {
+            if (_statsService == null)
+            {
+                return new ApiResponse
+                {
+                    Success = false,
+                    Message = "Statistics service is not available"
+                };
+            }
+
+            var config = await _statsService.GetSystemConfigurationAsync();
+
+            config.CaptureHttpRequests = request.CaptureHttpRequests;
+            config.CaptureLoggerMessages = request.CaptureLoggerMessages;
+
+            await _statsService.SaveSystemConfigurationAsync(config);
+
+            return new ApiResponse
+            {
+                Success = true,
+                Message = "Capture configuration saved successfully"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ApiResponse
+            {
+                Success = false,
+                Message = $"Error saving capture configuration: {ex.Message}"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Saves ignore paths configuration and returns JSON response
+    /// </summary>
+    /// <param name="request">Ignore paths request</param>
+    /// <returns>JSON response indicating success</returns>
+    public async Task<ApiResponse> SaveIgnorePathsApiAsync(SaveIgnorePathsRequest request)
+    {
+        try
+        {
+            if (_statsService == null)
+            {
+                return new ApiResponse
+                {
+                    Success = false,
+                    Message = "Statistics service is not available"
+                };
+            }
+
+            var config = await _statsService.GetSystemConfigurationAsync();
+            config.IgnorePaths = request.IgnorePaths;
+
+            await _statsService.SaveSystemConfigurationAsync(config);
+
+            return new ApiResponse
+            {
+                Success = true,
+                Message = "Ignore paths configuration saved successfully"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ApiResponse
+            {
+                Success = false,
+                Message = $"Error saving ignore paths configuration: {ex.Message}"
+            };
+        }
+    }
+
+    #endregion
 }
