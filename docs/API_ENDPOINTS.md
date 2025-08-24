@@ -14,6 +14,60 @@ https://tu-aplicacion/hubble/api/[endpoint]
 
 Si la autenticación está habilitada en Hubble, los endpoints de API requerirán la misma autenticación que la interfaz web.
 
+### Configuración de Autenticación
+
+La autenticación se puede configurar de dos maneras:
+
+#### 1. Usando appsettings.json (Recomendado)
+
+Agrega la siguiente sección a tu `appsettings.json`:
+
+```json
+{
+  "Hubble": {
+    "RequireAuthentication": true,
+    "Username": "admin",
+    "Password": "hubble123",
+    "BasePath": "/hubble"
+  }
+}
+```
+
+Luego configura Hubble en tu `Program.cs`:
+
+```csharp
+builder.Services.AddHubble(
+    builder.Configuration,
+    builder.Configuration.GetConnectionString("MongoConnection")!,
+    "HubbleDB"
+);
+```
+
+#### 2. Configuración Manual
+
+```csharp
+builder.Services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "HubbleDB";
+    options.RequireAuthentication = true;
+    options.Username = "admin";
+    options.Password = "hubble123";
+});
+```
+
+### Autenticación con Cookies
+
+Una vez que te autentiques a través de la interfaz web visitando `/hubble`, se creará una cookie que será válida para todas las solicitudes de API durante 8 horas.
+
+### Autenticación Básica HTTP
+
+Los endpoints de API también soportan autenticación básica HTTP usando las mismas credenciales configuradas:
+
+```bash
+curl -u admin:hubble123 "https://tu-aplicacion/hubble/api/logs"
+```
+
 ## Endpoints Disponibles
 
 ### 1. Obtener Logs

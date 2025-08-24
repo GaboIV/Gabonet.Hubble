@@ -18,6 +18,7 @@ using System.Web;
 public class HubbleUIMiddleware
 {
     private readonly RequestDelegate _next;
+    private const string HtmlContentType = "text/html";
 
     /// <summary>
     /// Constructor del middleware de la interfaz de usuario de Hubble.
@@ -151,7 +152,7 @@ public class HubbleUIMiddleware
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
             var html = await hubbleController.GetLogsViewAsync(method, url, statusGroup, logType, page, pageSize);
             
-            context.Response.ContentType = "text/html";
+            context.Response.ContentType = HtmlContentType;
             await context.Response.WriteAsync(html);
         }
         catch (Exception ex)
@@ -165,13 +166,14 @@ public class HubbleUIMiddleware
     {
         try
         {
-            var id = context.Request.Path.Value?.Split('/').Last();
+            var pathParts = context.Request.Path.Value?.Split('/') ?? Array.Empty<string>();
+            var id = pathParts.Length > 0 ? pathParts[pathParts.Length - 1] : "";
 
             // Obtener el controlador de Hubble
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
             var html = await hubbleController.GetLogDetailAsync(id ?? "");
 
-            context.Response.ContentType = "text/html";
+            context.Response.ContentType = HtmlContentType;
             await context.Response.WriteAsync(html);
         }
         catch (Exception ex)
@@ -189,7 +191,7 @@ public class HubbleUIMiddleware
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
             var html = await hubbleController.DeleteAllLogsAsync();
 
-            context.Response.ContentType = "text/html";
+            context.Response.ContentType = HtmlContentType;
             await context.Response.WriteAsync(html);
         }
         catch (Exception ex)
@@ -642,6 +644,12 @@ public class HubbleUIMiddleware
             return true;
         }
 
+        // Verificar autenticación básica HTTP primero
+        if (IsBasicAuthValid(context, options))
+        {
+            return true;
+        }
+
         // Verificar si existe la cookie de autenticación
         if (context.Request.Cookies.TryGetValue("HubbleAuth", out string? authToken))
         {
@@ -652,15 +660,57 @@ public class HubbleUIMiddleware
         return false;
     }
 
-    private string GenerateAuthToken(string username, string password)
+    private bool IsBasicAuthValid(HttpContext context, HubbleOptions options)
     {
-        // Crear un token simple basado en username y password
+        try
+        {
+            // Verificar si hay encabezado de autorización
+            if (!context.Request.Headers.ContainsKey("Authorization"))
+            {
+                return false;
+            }
+
+            var authHeader = context.Request.Headers["Authorization"].ToString();
+            
+            // Verificar que sea Basic Auth
+            if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Decodificar las credenciales
+            var encodedCredentials = authHeader.Substring("Basic ".Length).Trim();
+            var decodedBytes = Convert.FromBase64String(encodedCredentials);
+            var credentials = Encoding.UTF8.GetString(decodedBytes);
+            
+            // Separar usuario y contraseña
+            var parts = credentials.Split(':', 2);
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            var username = parts[0];
+            var password = parts[1];
+
+            // Verificar las credenciales
+            return username == options.Username && password == options.Password;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string GenerateAuthToken(string username, string password)
+    {
+        // Crear un token simple basado en username
         // En un entorno de producción, se recomendaría usar algo más seguro como JWT
         var tokenData = $"{username}:{DateTime.UtcNow.Ticks}";
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(tokenData));
     }
 
-    private bool ValidateAuthToken(string token, string username, string password)
+    private static bool ValidateAuthToken(string token, string username, string password)
     {
         try
         {
@@ -684,7 +734,7 @@ public class HubbleUIMiddleware
             // Verificar que el token no haya expirado (8 horas)
             if (long.TryParse(parts[1], out long timestamp))
             {
-                var tokenTime = new DateTime(timestamp);
+                var tokenTime = new DateTime(timestamp, DateTimeKind.Utc);
                 if (DateTime.UtcNow.Subtract(tokenTime).TotalHours > 8)
                 {
                     return false;

@@ -2292,7 +2292,7 @@ public class HubbleController
                 HasPreviousPage = page > 1
             };
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return new LogsApiResponse
             {
