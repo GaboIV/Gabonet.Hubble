@@ -7,7 +7,7 @@
     <AssemblyName>Gabonet.Hubble</AssemblyName>
     <RootNamespace>Gabonet.Hubble</RootNamespace>
     <PackageId>Gabonet.Hubble</PackageId>
-    <Version>0.2.15.2</Version>
+    <Version>0.2.20</Version>
     <Authors>Gabriel Caraballo</Authors>
     <Company>Gabonet</Company>
     <Description>Library for logging and visualizing .NET application logs, compatible with MongoDB 3.2.1</Description>

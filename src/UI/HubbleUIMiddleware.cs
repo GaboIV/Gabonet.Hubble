@@ -474,9 +474,10 @@ public class HubbleUIMiddleware
         var options = context.RequestServices.GetRequiredService<HubbleOptions>();
         var basePath = options.BasePath.ToLower();
         
-        // Obtener el controlador para acceder al logo
+        // Obtener el controlador para acceder al logo y la versión
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var hubbleLogo = hubbleController.GetHubbleLogo();
+        var version = hubbleController.GetVersion();
         
         var html = $@"
 <!DOCTYPE html>
@@ -540,6 +541,23 @@ public class HubbleUIMiddleware
             margin-bottom: 15px;
         }}
         
+        .app-info {{
+            text-align: center;
+            margin-bottom: 15px;
+        }}
+        
+        .app-title {{
+            font-size: 1em;
+            color: var(--text-primary);
+            font-weight: 500;
+        }}
+        
+        .app-version {{
+            color: var(--secondary-color);
+            font-size: 0.85em;
+            margin-left: 5px;
+        }}
+        
         .login-subtitle {{
             color: var(--text-secondary);
             font-size: 1rem;
@@ -552,6 +570,10 @@ public class HubbleUIMiddleware
         
         .form-group {{
             margin-bottom: 1.5rem;
+        }}
+        
+        .password-group {{
+            position: relative;
         }}
         
         label {{
@@ -574,6 +596,36 @@ public class HubbleUIMiddleware
             outline: none;
             border-color: var(--primary-light);
             box-shadow: 0 0 0 2px rgba(187, 134, 252, 0.25);
+        }}
+        
+        .password-input {{
+            padding-right: 2.5rem;
+        }}
+        
+        .password-toggle {{
+            position: absolute;
+            right: 1rem;
+            top: 2.75rem;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }}
+        
+        .password-toggle:hover {{
+            color: var(--text-primary);
+        }}
+        
+        .password-toggle svg {{
+            width: 1.2rem;
+            height: 1.2rem;
         }}
         
         button {{
@@ -610,6 +662,9 @@ public class HubbleUIMiddleware
             <div class='login-logo'>
                 {hubbleLogo}
             </div>
+            <div class='app-info'>
+                <p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>{version}</span></p>
+            </div>
             <p class='login-subtitle'>Inicia sesión para continuar</p>
         </div>
         
@@ -621,14 +676,38 @@ public class HubbleUIMiddleware
                 <input type='text' id='username' name='username' required autofocus />
             </div>
             
-            <div class='form-group'>
+            <div class='form-group password-group'>
                 <label for='password'>Contraseña</label>
-                <input type='password' id='password' name='password' required />
+                <input type='password' id='password' name='password' class='password-input' required />
+                <button type='button' class='password-toggle' onclick='togglePassword()' title='Mostrar/ocultar contraseña'>
+                    <svg id='eye-icon' viewBox='0 0 24 24' fill='currentColor'>
+                        <path d='M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z'/>
+                    </svg>
+                </button>
             </div>
             
             <button type='submit'>Iniciar sesión</button>
         </form>
     </div>
+
+    <script>
+        function togglePassword() {{
+            const passwordInput = document.getElementById('password');
+            const eyeIcon = document.getElementById('eye-icon');
+            const isPassword = passwordInput.type === 'password';
+            
+            passwordInput.type = isPassword ? 'text' : 'password';
+            
+            // Cambiar el icono
+            if (isPassword) {{
+                // Icono de ojo con tachado (ocultar)
+                eyeIcon.innerHTML = '<path d=""M2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z""/><path d=""M14.12 9.88c.09.46.04.87-.12 1.27l4.26 4.26c.94-.85 1.74-1.8 2.36-2.79-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.66 2.66c.4-.16.81-.21 1.27-.12l4.55 4.55z""/>';
+            }} else {{
+                // Icono de ojo normal (mostrar)
+                eyeIcon.innerHTML = '<path d=""M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z""/>';
+            }}
+        }}
+    </script>
 </body>
 </html>";
 

@@ -76,6 +76,15 @@ public class HubbleController
     }
 
     /// <summary>
+    /// Obtiene la versión actual de Hubble
+    /// </summary>
+    /// <returns>Versión de Hubble</returns>
+    public string GetVersion()
+    {
+        return _version;
+    }
+
+    /// <summary>
     /// Obtiene la lista de logs para mostrar en la interfaz de usuario.
     /// </summary>
     /// <param name="method">Método HTTP para filtrar</param>
