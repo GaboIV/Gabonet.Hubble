@@ -98,6 +98,11 @@ public class HubbleOptionsDto
     public string BasePath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Prefix path for Hubble UI
+    /// </summary>
+    public string PrefixPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Service name
     /// </summary>
     public string ServiceName { get; set; } = string.Empty;

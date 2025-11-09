@@ -482,6 +482,11 @@ public class HubbleOptions
     public string BasePath { get; set; } = "/hubble";
     
     /// <summary>
+    /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty.
+    /// </summary>
+    public string PrefixPath { get; set; } = string.Empty;
+    
+    /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
     /// </summary>
     public bool HighlightNewServices { get; set; } = false;

@@ -108,6 +108,7 @@ public static class ServiceCollectionExtensions
         hubbleConfig.Username = section[nameof(HubbleAuthConfiguration.Username)] ?? string.Empty;
         hubbleConfig.Password = section[nameof(HubbleAuthConfiguration.Password)] ?? string.Empty;
         hubbleConfig.BasePath = section[nameof(HubbleAuthConfiguration.BasePath)] ?? "/hubble";
+        hubbleConfig.PrefixPath = section[nameof(HubbleAuthConfiguration.PrefixPath)] ?? string.Empty;
         hubbleConfig.ServiceName = section[nameof(HubbleAuthConfiguration.ServiceName)] ?? "HubbleService";
         
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.EnableDiagnostics)], out bool enableDiag))
@@ -177,6 +178,7 @@ public static class ServiceCollectionExtensions
             Username = hubbleConfig.Username,
             Password = hubbleConfig.Password,
             BasePath = hubbleConfig.BasePath,
+            PrefixPath = hubbleConfig.PrefixPath,
             HighlightNewServices = hubbleConfig.HighlightNewServices,
             HighlightDurationSeconds = hubbleConfig.HighlightDurationSeconds,
             IgnorePaths = hubbleConfig.IgnorePaths ?? new List<string>(),
@@ -263,6 +265,7 @@ public static class ServiceCollectionExtensions
             Username = config.Username,
             Password = config.Password,
             BasePath = config.BasePath,
+            PrefixPath = config.PrefixPath,
             HighlightNewServices = config.HighlightNewServices,
             HighlightDurationSeconds = config.HighlightDurationSeconds,
             IgnorePaths = config.IgnorePaths ?? new List<string>(),
@@ -425,6 +428,11 @@ public class HubbleConfiguration
     /// Ruta base para acceder a la interfaz de Hubble
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
+    
+    /// <summary>
+    /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty
+    /// </summary>
+    public string PrefixPath { get; set; } = string.Empty;
     
     /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.

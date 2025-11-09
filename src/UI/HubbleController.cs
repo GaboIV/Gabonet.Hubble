@@ -18,6 +18,7 @@ public class HubbleController
     private readonly IHubbleService _hubbleService;
     private readonly string _version;
     private readonly string _basePath;
+    private readonly string _prefixPath;
     private readonly Middleware.HubbleOptions _options;
     private readonly IHubbleStatsService? _statsService;
 
@@ -35,6 +36,7 @@ public class HubbleController
         _hubbleService = hubbleService;
         _version = GetAssemblyVersion();
         _basePath = options.BasePath.TrimEnd('/');
+        _prefixPath = options.PrefixPath.TrimEnd('/');
         _options = options;
         _statsService = statsService;
     }
@@ -147,8 +149,8 @@ public class HubbleController
         // {
         //     html += "<div class='live-indicator'>Actualización en tiempo real <span id='reload-counter'>3</span>s</div>";
         // }
-        html += $"<a href='{_basePath}/config' class='btn primary'>Configuración</a>";
-        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/config' class='btn primary'>Configuración</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -207,7 +209,7 @@ public class HubbleController
 
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
-        html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
+        html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_prefixPath}{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
         html += "</div>";
 
         // Tabla de logs
@@ -300,11 +302,11 @@ public class HubbleController
             // Añadir la etiqueta "NUEVO" para servicios resaltados en la columna de acciones
             if (highlightClass.Contains("new-service") && !string.IsNullOrEmpty(log.ServiceName))
             {
-                html += $"<td><a href='{_basePath}/detail/{log.Id}' class='btn small'>Ver</a>♾️</td>";
+                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{log.Id}' class='btn small'>Ver</a>♾️</td>";
             }
             else
             {
-                html += $"<td><a href='{_basePath}/detail/{log.Id}' class='btn small'>Ver</a></td>";
+                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{log.Id}' class='btn small'>Ver</a></td>";
             }
 
             html += "</tr>";
@@ -504,13 +506,13 @@ public class HubbleController
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
         html += "<div class='action-buttons'>";
-        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
         html += "</div>";
         html += "</div>";
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -790,14 +792,14 @@ public class HubbleController
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
         html += "<div class='card success-card'>";
         html += "<h2>Operación exitosa</h2>";
         html += "<p>Todos los logs han sido eliminados correctamente.</p><br>";
-        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
         html += "</div>";
 
         html += "</div>";
@@ -821,13 +823,13 @@ public class HubbleController
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
         html += "<div class='action-buttons'>";
-        html += $"<a href='{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
         html += "</div>";
         html += "</div>";
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
 
@@ -850,7 +852,7 @@ public class HubbleController
     public string GetHubbleLogo()
     {
         return $@"<div class='logo-container'>
-            <a href='{_basePath}' title='Recargar Hubble Dashboard' class='logo-link'>
+            <a href='{_prefixPath}{_basePath}' title='Recargar Hubble Dashboard' class='logo-link'>
                 <svg width='200' height='60' viewBox='0 0 200 60' fill='none' xmlns='http://www.w3.org/2000/svg' class='hubble-logo'>
                     <!-- Fondo circular principal -->
                     <circle cx='30' cy='30' r='28' fill='#121212' stroke='#6200EE' stroke-width='3'></circle>
@@ -1775,8 +1777,8 @@ public class HubbleController
         
         // Botones de navegación
         html += "<div class='header-right'>";
-        html += $"<a href='{_basePath}' class='btn secondary'>Volver a logs</a>";
-        html += $"<a href='{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn secondary'>Volver a logs</a>";
+        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
         
@@ -1879,7 +1881,7 @@ public class HubbleController
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Ruta base:</label>";
-        html += $"<div class='config-value'>{_basePath}</div>";
+        html += $"<div class='config-value'>{_prefixPath}{_basePath}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Autenticación requerida:</label>";
@@ -2070,7 +2072,7 @@ public class HubbleController
             var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
             await _statsService.UpdatePruneStatisticsAsync(DateTime.UtcNow, logsDeleted);
             
-            return $"<script>alert('Limpieza manual completada. Se eliminaron {logsDeleted} logs.'); window.location.href='{_basePath}/config';</script>";
+            return $"<script>alert('Limpieza manual completada. Se eliminaron {logsDeleted} logs.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
         {
@@ -2092,7 +2094,7 @@ public class HubbleController
         try
         {
             await _statsService.RecalculateStatisticsAsync();
-            return $"<script>alert('Estadísticas recalculadas correctamente.'); window.location.href='{_basePath}/config';</script>";
+            return $"<script>alert('Estadísticas recalculadas correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
         {
@@ -2124,7 +2126,7 @@ public class HubbleController
             
             await _statsService.SaveSystemConfigurationAsync(config);
             
-            return $"<script>alert('Configuración guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+            return $"<script>alert('Configuración guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
         {
@@ -2156,7 +2158,7 @@ public class HubbleController
             
             await _statsService.SaveSystemConfigurationAsync(config);
             
-            return $"<script>alert('Configuración de captura guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+            return $"<script>alert('Configuración de captura guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
         {
@@ -2190,7 +2192,7 @@ public class HubbleController
             
             await _statsService.SaveSystemConfigurationAsync(config);
             
-            return $"<script>alert('Configuración de rutas ignoradas guardada correctamente.'); window.location.href='{_basePath}/config';</script>";
+            return $"<script>alert('Configuración de rutas ignoradas guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
         {
@@ -2407,6 +2409,7 @@ public class HubbleController
                 Options = new HubbleOptionsDto
                 {
                     BasePath = _basePath,
+                    PrefixPath = _prefixPath,
                     ServiceName = _options.ServiceName,
                     CaptureHttpRequests = _options.CaptureHttpRequests,
                     CaptureLoggerMessages = _options.CaptureLoggerMessages,
@@ -2432,6 +2435,7 @@ public class HubbleController
                 Options = new HubbleOptionsDto
                 {
                     BasePath = _basePath,
+                    PrefixPath = _prefixPath,
                     ServiceName = _options.ServiceName,
                     CaptureHttpRequests = _options.CaptureHttpRequests,
                     CaptureLoggerMessages = _options.CaptureLoggerMessages,

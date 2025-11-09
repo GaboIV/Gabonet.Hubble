@@ -420,6 +420,7 @@ public class HubbleUIMiddleware
     private async Task HandleLoginAsync(HttpContext context, HubbleOptions options)
     {
         var basePath = options.BasePath.ToLower();
+        var prefixPath = options.PrefixPath.ToLower();
         
         // Leer el cuerpo de la solicitud para obtener las credenciales
         context.Request.EnableBuffering();
@@ -441,11 +442,11 @@ public class HubbleUIMiddleware
                 Secure = context.Request.IsHttps,
                 SameSite = SameSiteMode.Lax,
                 Expires = DateTimeOffset.Now.AddHours(8), // La cookie expira después de 8 horas
-                Path = basePath // Solo válida para las rutas de Hubble
+                Path = prefixPath + basePath // Solo válida para las rutas de Hubble
             });
 
             // Redirigir al usuario a la página principal de Hubble
-            context.Response.Redirect(basePath);
+            context.Response.Redirect(prefixPath + basePath);
         }
         else
         {
@@ -458,21 +459,23 @@ public class HubbleUIMiddleware
     {
         var options = context.RequestServices.GetRequiredService<HubbleOptions>();
         var basePath = options.BasePath.ToLower();
-        
+        var prefixPath = options.PrefixPath.ToLower();
+
         // Eliminar la cookie de autenticación
         context.Response.Cookies.Delete("HubbleAuth", new CookieOptions
         {
-            Path = basePath
+            Path = prefixPath + basePath    
         });
 
         // Redirigir al formulario de inicio de sesión
-        context.Response.Redirect(basePath);
+        context.Response.Redirect(prefixPath + basePath);
     }
 
     private async Task ShowLoginFormAsync(HttpContext context, bool showError = false)
     {
         var options = context.RequestServices.GetRequiredService<HubbleOptions>();
         var basePath = options.BasePath.ToLower();
+        var prefixPath = options.PrefixPath.ToLower();
         
         // Obtener el controlador para acceder al logo y la versión
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
@@ -670,7 +673,7 @@ public class HubbleUIMiddleware
         
         {(showError ? @"<div class='error-message'>Nombre de usuario o contraseña incorrectos</div>" : "")}
         
-        <form class='login-form' method='post' action='{basePath}/login'>
+        <form class='login-form' method='post' action='{prefixPath}{basePath}/login'>
             <div class='form-group'>
                 <label for='username'>Nombre de usuario</label>
                 <input type='text' id='username' name='username' required autofocus />
