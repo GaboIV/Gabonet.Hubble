@@ -52,7 +52,7 @@ public class HubbleService : IHubbleService
                 _timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             _timeZone = TimeZoneInfo.Utc;
         }
@@ -120,7 +120,7 @@ public class HubbleService : IHubbleService
             {
                 log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Mantener la fecha original sin conversión
             }
@@ -342,7 +342,7 @@ public class HubbleService : IHubbleService
             {
                 log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
             }
         }
@@ -470,7 +470,7 @@ public class HubbleService : IHubbleService
                 var originalTimestamp = log.Timestamp;
                 log.Timestamp = TimeZoneInfo.ConvertTimeFromUtc(log.Timestamp, _timeZone);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
             }
         }

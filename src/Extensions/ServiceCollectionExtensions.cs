@@ -3,15 +3,18 @@ namespace Gabonet.Hubble.Extensions;
 using Gabonet.Hubble.Interfaces;
 using Gabonet.Hubble.Logging;
 using Gabonet.Hubble.Middleware;
+using Gabonet.Hubble.Models;
 using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>
 /// Extensiones para configurar los servicios de Hubble en la aplicación.
@@ -69,6 +72,159 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Agrega los servicios de Hubble a la colección de servicios usando configuración desde appsettings.json
+    /// </summary>
+    /// <param name="services">Colección de servicios</param>
+    /// <param name="configuration">Configuración de la aplicación</param>
+    /// <param name="connectionString">Cadena de conexión a MongoDB</param>
+    /// <param name="databaseName">Nombre de la base de datos</param>
+    /// <param name="sectionName">Nombre de la sección en appsettings.json (por defecto: "Hubble")</param>
+    /// <returns>Colección de servicios con Hubble configurado</returns>
+    public static IServiceCollection AddHubble(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        string connectionString,
+        string databaseName,
+        string sectionName = HubbleAuthConfiguration.SectionName)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            throw new ArgumentException("La cadena de conexión es requerida", nameof(connectionString));
+        }
+
+        if (string.IsNullOrEmpty(databaseName))
+        {
+            throw new ArgumentException("El nombre de la base de datos es requerido", nameof(databaseName));
+        }
+
+        // Cargar configuración desde appsettings.json
+        var hubbleConfig = new HubbleAuthConfiguration();
+        var section = configuration.GetSection(sectionName);
+        
+        // Cargar valores manualmente desde la configuración usando indexadores
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.RequireAuthentication)], out bool requireAuth))
+            hubbleConfig.RequireAuthentication = requireAuth;
+        
+        hubbleConfig.Username = section[nameof(HubbleAuthConfiguration.Username)] ?? string.Empty;
+        hubbleConfig.Password = section[nameof(HubbleAuthConfiguration.Password)] ?? string.Empty;
+        hubbleConfig.BasePath = section[nameof(HubbleAuthConfiguration.BasePath)] ?? "/hubble";
+        hubbleConfig.PrefixPath = section[nameof(HubbleAuthConfiguration.PrefixPath)] ?? string.Empty;
+        hubbleConfig.ServiceName = section[nameof(HubbleAuthConfiguration.ServiceName)] ?? "HubbleService";
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.EnableDiagnostics)], out bool enableDiag))
+            hubbleConfig.EnableDiagnostics = enableDiag;
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.CaptureLoggerMessages)], out bool captureLogger))
+            hubbleConfig.CaptureLoggerMessages = captureLogger;
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.CaptureHttpRequests)], out bool captureHttp))
+            hubbleConfig.CaptureHttpRequests = captureHttp;
+        else
+            hubbleConfig.CaptureHttpRequests = true; // Valor por defecto
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.IgnoreStaticFiles)], out bool ignoreStatic))
+            hubbleConfig.IgnoreStaticFiles = ignoreStatic;
+        else
+            hubbleConfig.IgnoreStaticFiles = true; // Valor por defecto
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.EnableDataPrune)], out bool enablePrune))
+            hubbleConfig.EnableDataPrune = enablePrune;
+        
+        if (int.TryParse(section[nameof(HubbleAuthConfiguration.DataPruneIntervalHours)], out int pruneInterval))
+            hubbleConfig.DataPruneIntervalHours = pruneInterval;
+        else
+            hubbleConfig.DataPruneIntervalHours = 1; // Valor por defecto
+        
+        if (int.TryParse(section[nameof(HubbleAuthConfiguration.MaxLogAgeHours)], out int maxAge))
+            hubbleConfig.MaxLogAgeHours = maxAge;
+        else
+            hubbleConfig.MaxLogAgeHours = 24; // Valor por defecto
+        
+        hubbleConfig.TimeZoneId = section[nameof(HubbleAuthConfiguration.TimeZoneId)] ?? string.Empty;
+        
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.HighlightNewServices)], out bool highlightNew))
+            hubbleConfig.HighlightNewServices = highlightNew;
+        
+        if (int.TryParse(section[nameof(HubbleAuthConfiguration.HighlightDurationSeconds)], out int highlightDuration))
+            hubbleConfig.HighlightDurationSeconds = highlightDuration;
+        else
+            hubbleConfig.HighlightDurationSeconds = 5; // Valor por defecto
+        
+        // Cargar IgnorePaths como array
+        var ignorePathsSection = section.GetSection(nameof(HubbleAuthConfiguration.IgnorePaths));
+        var ignorePaths = new List<string>();
+        foreach (var child in ignorePathsSection.GetChildren())
+        {
+            if (!string.IsNullOrEmpty(child.Value))
+                ignorePaths.Add(child.Value);
+        }
+        hubbleConfig.IgnorePaths = ignorePaths;
+
+        // Registrar el cliente de MongoDB
+        var mongoClient = new MongoClient(connectionString);
+        services.AddSingleton<IMongoClient>(mongoClient);
+
+        // Registrar el acceso al contexto HTTP
+        services.AddHttpContextAccessor();
+
+        // Crear las opciones de Hubble usando la configuración cargada
+        var options = new HubbleOptions
+        {
+            ServiceName = hubbleConfig.ServiceName,
+            EnableDiagnostics = hubbleConfig.EnableDiagnostics,
+            CaptureLoggerMessages = hubbleConfig.CaptureLoggerMessages,
+            CaptureHttpRequests = hubbleConfig.CaptureHttpRequests,
+            RequireAuthentication = hubbleConfig.RequireAuthentication,
+            Username = hubbleConfig.Username,
+            Password = hubbleConfig.Password,
+            BasePath = hubbleConfig.BasePath,
+            PrefixPath = hubbleConfig.PrefixPath,
+            HighlightNewServices = hubbleConfig.HighlightNewServices,
+            HighlightDurationSeconds = hubbleConfig.HighlightDurationSeconds,
+            IgnorePaths = hubbleConfig.IgnorePaths ?? new List<string>(),
+            IgnoreStaticFiles = hubbleConfig.IgnoreStaticFiles,
+            EnableDataPrune = hubbleConfig.EnableDataPrune,
+            DataPruneIntervalHours = hubbleConfig.DataPruneIntervalHours,
+            MaxLogAgeHours = hubbleConfig.MaxLogAgeHours,
+            TimeZoneId = hubbleConfig.TimeZoneId
+        };
+        
+        services.AddSingleton(options);
+
+        // Registrar el servicio de Hubble
+        services.AddScoped<IHubbleService>(provider =>
+        {
+            var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
+            return new HubbleService(mongoClient, databaseName, httpContextAccessor, hubbleConfig.ServiceName, hubbleConfig.TimeZoneId);
+        });
+        
+        // Registrar el servicio de estadísticas de Hubble
+        services.AddSingleton<IHubbleStatsService>(provider =>
+        {
+            var logger = provider.GetRequiredService<ILogger<HubbleStatsService>>();
+            return new HubbleStatsService(mongoClient, databaseName, options, logger);
+        });
+
+        // Registrar el controlador de Hubble
+        services.AddTransient<HubbleController>();
+        
+        // Registrar el servicio de limpieza de datos si está habilitado
+        if (hubbleConfig.EnableDataPrune)
+        {
+            services.AddHostedService<BackgroundServices.DataPruneService>();
+            Console.WriteLine($"[Hubble] Servicio de limpieza automática habilitado (Intervalo: {hubbleConfig.DataPruneIntervalHours}h, Max. edad: {hubbleConfig.MaxLogAgeHours}h)");
+        }
+
+        // Mostrar información de autenticación
+        if (hubbleConfig.RequireAuthentication)
+        {
+            Console.WriteLine($"[Hubble] Autenticación habilitada para usuario: {hubbleConfig.Username}");
+        }
+
+        return services;
+    }
+
+    /// <summary>
     /// Agrega los servicios de Hubble a la colección de servicios con opciones personalizadas.
     /// </summary>
     /// <param name="services">Colección de servicios</param>
@@ -109,6 +265,7 @@ public static class ServiceCollectionExtensions
             Username = config.Username,
             Password = config.Password,
             BasePath = config.BasePath,
+            PrefixPath = config.PrefixPath,
             HighlightNewServices = config.HighlightNewServices,
             HighlightDurationSeconds = config.HighlightDurationSeconds,
             IgnorePaths = config.IgnorePaths ?? new List<string>(),
@@ -271,6 +428,11 @@ public class HubbleConfiguration
     /// Ruta base para acceder a la interfaz de Hubble
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
+    
+    /// <summary>
+    /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty
+    /// </summary>
+    public string PrefixPath { get; set; } = string.Empty;
     
     /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
