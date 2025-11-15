@@ -308,8 +308,8 @@ public class HubbleService : IHubbleService
             ControllerName = "ApplicationLogger",
             // Incluir la información de origen junto al nivel de log si está disponible
             ActionName = sourceInfo.Length > 0 ? $"{logLevel} [{sourceInfo}]" : logLevel.ToString(),
-            HttpUrl = httpContext?.Request.Path ?? "No URL available",
-            Method = httpContext?.Request.Method ?? "No Method",
+            HttpUrl = httpContext?.Request.Path.ToString() ?? "No URL available",
+            Method = httpContext?.Request.Method.ToString() ?? "No Method",
             RequestData = category,
             ResponseData = cleanMessage,
             StatusCode = logLevel >= LogLevel.Error ? 500 : 200,
