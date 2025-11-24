@@ -34,8 +34,8 @@ public class HubbleMiddleware
     /// <param name="serviceProvider">Proveedor de servicios</param>
     /// <param name="options">Opciones de configuración</param>
     public HubbleMiddleware(
-        RequestDelegate next, 
-        IHttpContextAccessor httpContextAccessor, 
+        RequestDelegate next,
+        IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
         HubbleOptions options)
     {
@@ -44,11 +44,11 @@ public class HubbleMiddleware
         _serviceProvider = serviceProvider;
         _options = options;
         _pruneManager = new HubbleDataPruneManager(options);
-        
+
         // Mostrar información de inicialización
         Console.WriteLine($"[Hubble] Servicio inicializado para: {options.ServiceName}");
         Console.WriteLine($"[Hubble] Limpieza automática de datos: {(options.EnableDataPrune ? "Activada" : "Desactivada")}");
-        
+
         if (options.EnableDataPrune)
         {
             Console.WriteLine($"[Hubble] Intervalo de limpieza: {options.DataPruneIntervalHours} hora(s)");
@@ -95,12 +95,12 @@ public class HubbleMiddleware
             {
                 // Registrar el log al principio y guardarlo en el contexto para que
                 // los loggers puedan asociarse a él
-                try 
+                try
                 {
                     using (var scope = _serviceProvider.CreateScope())
                     {
                         var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
-                        
+
                         // Crear un log inicial que se actualizará más tarde
                         var initialLog = new GeneralLog
                         {
@@ -112,10 +112,10 @@ public class HubbleMiddleware
                             RequestHeaders = FormatHeaders(context.Request.Headers),
                             Timestamp = DateTime.UtcNow
                         };
-                        
+
                         // Guardar el log en la base de datos para obtener su ID
                         await hubbleService.CreateLogAsync(initialLog);
-                        
+
                         // Guardar el log en el contexto HTTP
                         context.Items["Hubble_RequestLog"] = initialLog;
                         requestLog = initialLog;
@@ -131,7 +131,7 @@ public class HubbleMiddleware
 
                 // Capturar la respuesta
                 var response = await FormatResponse(context.Response);
-                
+
                 // Obtener las consultas a bases de datos capturadas
                 var databaseQueries = context.GetDatabaseQueries();
 
@@ -153,10 +153,10 @@ public class HubbleMiddleware
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
                             requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-                            
+
                             string controllerName = "Unknown";
                             string actionName = "Unknown";
-                            
+
                             // Obtener información de controlador y acción si está disponible
                             var routeData = context.GetRouteData();
                             if (routeData != null)
@@ -174,27 +174,27 @@ public class HubbleMiddleware
                                     actionName = actionValue.ToString() ?? "Unknown";
                                 }
                             }
-                            
+
                             requestLog.ControllerName = controllerName;
                             requestLog.ActionName = actionName;
-                            
+
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
                         }
                         else
                         {
                             // Si por alguna razón no existe el log inicial, crear uno nuevo
                             await LogGeneralAsync(
-                                context, 
-                                hubbleService, 
-                                request, 
-                                response, 
-                                false, 
-                                null, 
-                                null, 
-                                databaseQueries, 
+                                context,
+                                hubbleService,
+                                request,
+                                response,
+                                false,
+                                null,
+                                null,
+                                databaseQueries,
                                 executionTime);
                         }
-                        
+
                         // Ejecutar la limpieza de datos históricos si está habilitada
                         await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
@@ -215,7 +215,7 @@ public class HubbleMiddleware
                     Console.WriteLine($"HubbleMiddleware: Error: {ex.Message}");
                     Console.WriteLine($"HubbleMiddleware: StackTrace: {ex.StackTrace}");
                 }
-                
+
                 try
                 {
                     using (var scope = _serviceProvider.CreateScope())
@@ -237,24 +237,24 @@ public class HubbleMiddleware
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
                             requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-                            
+
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
                         }
                         else
                         {
                             // Si no existe el log inicial, crear uno nuevo
                             await LogGeneralAsync(
-                                context, 
-                                hubbleService, 
-                                request, 
-                                null, 
-                                true, 
-                                ex.Message, 
-                                ex.StackTrace, 
-                                databaseQueries, 
+                                context,
+                                hubbleService,
+                                request,
+                                null,
+                                true,
+                                ex.Message,
+                                ex.StackTrace,
+                                databaseQueries,
                                 executionTime);
                         }
-                        
+
                         // Ejecutar la limpieza de datos históricos si está habilitada
                         await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
@@ -267,7 +267,7 @@ public class HubbleMiddleware
                         Console.WriteLine($"HubbleMiddleware: Error al obtener HubbleService para error: {serviceEx.Message}");
                     }
                 }
-                
+
                 throw; // Propagamos la excepción original
             }
             finally
@@ -321,6 +321,12 @@ public class HubbleMiddleware
             return true;
         }
 
+        // Si se permite explícitamente el comodín "*", permitir todas
+        if (_options.Security.AllowedIps.Contains("*"))
+        {
+            return true;
+        }
+
         var clientIp = context.Connection.RemoteIpAddress?.ToString();
 
         // Si no se puede obtener la IP, denegar
@@ -338,6 +344,8 @@ public class HubbleMiddleware
         // Verificar si la IP está en la lista permitida
         foreach (var allowedIp in _options.Security.AllowedIps)
         {
+            if (string.IsNullOrWhiteSpace(allowedIp)) continue;
+
             if (allowedIp.Contains("/"))
             {
                 // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
@@ -386,14 +394,14 @@ public class HubbleMiddleware
     }
 
     private async Task LogGeneralAsync(
-        HttpContext context, 
-        IHubbleService hubbleService, 
-        string request, 
-        string? response, 
-        bool isError, 
-        string? errorMessage, 
-        string? stackTrace, 
-        List<DatabaseQueryLog> databaseQueries, 
+        HttpContext context,
+        IHubbleService hubbleService,
+        string request,
+        string? response,
+        bool isError,
+        string? errorMessage,
+        string? stackTrace,
+        List<DatabaseQueryLog> databaseQueries,
         long executionTime)
     {
         // Si no está habilitada la captura de logs HTTP, salir
@@ -403,7 +411,7 @@ public class HubbleMiddleware
         }
 
         var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
-        
+
         if (ipAddress == "::1" || ipAddress == "127.0.0.1")
         {
             ipAddress = "Localhost";
@@ -457,7 +465,7 @@ public class HubbleMiddleware
 
         // Guardar el log en la base de datos
         await hubbleService.CreateLogAsync(log);
-        
+
         // Guardar el log en el contexto HTTP para que los logs de ILogger puedan referenciarlo
         context.Items["Hubble_RequestLog"] = log;
     }
@@ -503,7 +511,7 @@ public class HubbleMiddleware
             return string.Empty;
         }
     }
-    
+
     private string FormatHeaders(IHeaderDictionary headers)
     {
         var formattedHeaders = headers.ToDictionary(h => h.Key, h => h.Value.ToString());
@@ -595,7 +603,7 @@ public class HubbleOptions
     /// Indica si se deben mostrar mensajes de diagnóstico en la consola.
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
-    
+
     /// <summary>
     /// Indica si se deben capturar los mensajes de ILogger.
     /// </summary>
@@ -605,57 +613,57 @@ public class HubbleOptions
     /// Indica si se deben capturar las solicitudes HTTP.
     /// </summary>
     public bool CaptureHttpRequests { get; set; } = true;
-    
+
     /// <summary>
     /// Indica si se debe requerir autenticación para acceder a la interfaz de Hubble.
     /// </summary>
     public bool RequireAuthentication { get; set; } = false;
-    
+
     /// <summary>
     /// Nombre de usuario para la autenticación (si RequireAuthentication es true).
     /// </summary>
     public string Username { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Contraseña para la autenticación (si RequireAuthentication es true).
     /// </summary>
     public string Password { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
-    
+
     /// <summary>
     /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty.
     /// </summary>
     public string PrefixPath { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
     /// </summary>
     public bool HighlightNewServices { get; set; } = false;
-    
+
     /// <summary>
     /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
-    
+
     /// <summary>
     /// Activa o desactiva el sistema de limpieza automática de logs antiguos.
     /// </summary>
     public bool EnableDataPrune { get; set; } = false;
-    
+
     /// <summary>
     /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs.
     /// </summary>
     public int DataPruneIntervalHours { get; set; } = 1;
-    
+
     /// <summary>
     /// Edad máxima en horas que se conservarán los logs antes de ser eliminados.
     /// </summary>
     public int MaxLogAgeHours { get; set; } = 24;
-    
+
     /// <summary>
     /// ID de la zona horaria para mostrar las fechas. Si está vacío, se usará UTC.
     /// </summary>
@@ -685,5 +693,5 @@ public class SecurityConfiguration
     /// <summary>
     /// Solo permitir acceso desde estas IPs (VPN/Oficina)
     /// </summary>
-    public List<string> AllowedIps { get; set; } = new List<string> { "127.0.0.1" };
+    public List<string> AllowedIps { get; set; } = new List<string>();
 }

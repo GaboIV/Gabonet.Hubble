@@ -100,56 +100,56 @@ public static class ServiceCollectionExtensions
         // Cargar configuración desde appsettings.json
         var hubbleConfig = new HubbleAuthConfiguration();
         var section = configuration.GetSection(sectionName);
-        
+
         // Cargar valores manualmente desde la configuración usando indexadores
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.RequireAuthentication)], out bool requireAuth))
             hubbleConfig.RequireAuthentication = requireAuth;
-        
+
         hubbleConfig.Username = section[nameof(HubbleAuthConfiguration.Username)] ?? string.Empty;
         hubbleConfig.Password = section[nameof(HubbleAuthConfiguration.Password)] ?? string.Empty;
         hubbleConfig.BasePath = section[nameof(HubbleAuthConfiguration.BasePath)] ?? "/hubble";
         hubbleConfig.PrefixPath = section[nameof(HubbleAuthConfiguration.PrefixPath)] ?? string.Empty;
         hubbleConfig.ServiceName = section[nameof(HubbleAuthConfiguration.ServiceName)] ?? "HubbleService";
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.EnableDiagnostics)], out bool enableDiag))
             hubbleConfig.EnableDiagnostics = enableDiag;
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.CaptureLoggerMessages)], out bool captureLogger))
             hubbleConfig.CaptureLoggerMessages = captureLogger;
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.CaptureHttpRequests)], out bool captureHttp))
             hubbleConfig.CaptureHttpRequests = captureHttp;
         else
             hubbleConfig.CaptureHttpRequests = true; // Valor por defecto
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.IgnoreStaticFiles)], out bool ignoreStatic))
             hubbleConfig.IgnoreStaticFiles = ignoreStatic;
         else
             hubbleConfig.IgnoreStaticFiles = true; // Valor por defecto
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.EnableDataPrune)], out bool enablePrune))
             hubbleConfig.EnableDataPrune = enablePrune;
-        
+
         if (int.TryParse(section[nameof(HubbleAuthConfiguration.DataPruneIntervalHours)], out int pruneInterval))
             hubbleConfig.DataPruneIntervalHours = pruneInterval;
         else
             hubbleConfig.DataPruneIntervalHours = 1; // Valor por defecto
-        
+
         if (int.TryParse(section[nameof(HubbleAuthConfiguration.MaxLogAgeHours)], out int maxAge))
             hubbleConfig.MaxLogAgeHours = maxAge;
         else
             hubbleConfig.MaxLogAgeHours = 24; // Valor por defecto
-        
+
         hubbleConfig.TimeZoneId = section[nameof(HubbleAuthConfiguration.TimeZoneId)] ?? string.Empty;
-        
+
         if (bool.TryParse(section[nameof(HubbleAuthConfiguration.HighlightNewServices)], out bool highlightNew))
             hubbleConfig.HighlightNewServices = highlightNew;
-        
+
         if (int.TryParse(section[nameof(HubbleAuthConfiguration.HighlightDurationSeconds)], out int highlightDuration))
             hubbleConfig.HighlightDurationSeconds = highlightDuration;
         else
             hubbleConfig.HighlightDurationSeconds = 5; // Valor por defecto
-        
+
         // Cargar IgnorePaths como array
         var ignorePathsSection = section.GetSection(nameof(HubbleAuthConfiguration.IgnorePaths));
         var ignorePaths = new List<string>();
@@ -159,6 +159,35 @@ public static class ServiceCollectionExtensions
                 ignorePaths.Add(child.Value);
         }
         hubbleConfig.IgnorePaths = ignorePaths;
+
+        // Cargar configuración de seguridad
+        var securitySection = section.GetSection("Security");
+        if (securitySection.Exists())
+        {
+            var maskBodySection = securitySection.GetSection(nameof(Gabonet.Hubble.Models.SecurityConfiguration.MaskBodyProperties));
+            var maskBody = new List<string>();
+            foreach (var child in maskBodySection.GetChildren())
+            {
+                if (!string.IsNullOrEmpty(child.Value)) maskBody.Add(child.Value);
+            }
+            if (maskBody.Any()) hubbleConfig.Security.MaskBodyProperties = maskBody;
+
+            var maskHeadersSection = securitySection.GetSection(nameof(Gabonet.Hubble.Models.SecurityConfiguration.MaskHeaders));
+            var maskHeaders = new List<string>();
+            foreach (var child in maskHeadersSection.GetChildren())
+            {
+                if (!string.IsNullOrEmpty(child.Value)) maskHeaders.Add(child.Value);
+            }
+            if (maskHeaders.Any()) hubbleConfig.Security.MaskHeaders = maskHeaders;
+
+            var allowedIpsSection = securitySection.GetSection(nameof(Gabonet.Hubble.Models.SecurityConfiguration.AllowedIps));
+            var allowedIps = new List<string>();
+            foreach (var child in allowedIpsSection.GetChildren())
+            {
+                if (!string.IsNullOrEmpty(child.Value)) allowedIps.Add(child.Value);
+            }
+            if (allowedIps.Any()) hubbleConfig.Security.AllowedIps = allowedIps;
+        }
 
         // Registrar el cliente de MongoDB
         var mongoClient = new MongoClient(connectionString);
@@ -186,9 +215,15 @@ public static class ServiceCollectionExtensions
             EnableDataPrune = hubbleConfig.EnableDataPrune,
             DataPruneIntervalHours = hubbleConfig.DataPruneIntervalHours,
             MaxLogAgeHours = hubbleConfig.MaxLogAgeHours,
-            TimeZoneId = hubbleConfig.TimeZoneId
+            TimeZoneId = hubbleConfig.TimeZoneId,
+            Security = new Gabonet.Hubble.Middleware.SecurityConfiguration
+            {
+                MaskBodyProperties = hubbleConfig.Security.MaskBodyProperties,
+                MaskHeaders = hubbleConfig.Security.MaskHeaders,
+                AllowedIps = hubbleConfig.Security.AllowedIps
+            }
         };
-        
+
         services.AddSingleton(options);
 
         // Registrar el servicio de Hubble
@@ -197,7 +232,7 @@ public static class ServiceCollectionExtensions
             var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
             return new HubbleService(mongoClient, databaseName, httpContextAccessor, hubbleConfig.ServiceName, hubbleConfig.TimeZoneId);
         });
-        
+
         // Registrar el servicio de estadísticas de Hubble
         services.AddSingleton<IHubbleStatsService>(provider =>
         {
@@ -207,7 +242,7 @@ public static class ServiceCollectionExtensions
 
         // Registrar el controlador de Hubble
         services.AddTransient<HubbleController>();
-        
+
         // Registrar el servicio de limpieza de datos si está habilitado
         if (hubbleConfig.EnableDataPrune)
         {
@@ -272,9 +307,10 @@ public static class ServiceCollectionExtensions
             EnableDataPrune = config.EnableDataPrune,
             DataPruneIntervalHours = config.DataPruneIntervalHours,
             MaxLogAgeHours = config.MaxLogAgeHours,
-            TimeZoneId = config.TimeZoneId
+            TimeZoneId = config.TimeZoneId,
+            Security = config.Security
         };
-        
+
         services.AddSingleton(options);
 
         // Registrar el servicio de Hubble
@@ -283,7 +319,7 @@ public static class ServiceCollectionExtensions
             var httpContextAccessor = provider.GetRequiredService<IHttpContextAccessor>();
             return new HubbleService(mongoClient, config.DatabaseName, httpContextAccessor, config.ServiceName, config.TimeZoneId);
         });
-        
+
         // Registrar el servicio de estadísticas de Hubble
         services.AddSingleton<IHubbleStatsService>(provider =>
         {
@@ -293,7 +329,7 @@ public static class ServiceCollectionExtensions
 
         // Registrar el controlador de Hubble
         services.AddTransient<HubbleController>();
-        
+
         // Registrar el servicio de limpieza de datos si está habilitado
         if (config.EnableDataPrune)
         {
@@ -312,20 +348,20 @@ public static class ServiceCollectionExtensions
     public static IApplicationBuilder UseHubble(this IApplicationBuilder app)
     {
         Console.WriteLine($"[Hubble] Iniciando middleware...");
-        
+
         // Obtener las opciones configuradas
         var options = app.ApplicationServices.GetService<HubbleOptions>();
         if (options != null)
         {
             Console.WriteLine($"[Hubble] Servicio: {options.ServiceName}");
             Console.WriteLine($"[Hubble] Interfaz web disponible en: {options.BasePath}");
-            
+
             if (options.RequireAuthentication)
             {
                 Console.WriteLine($"[Hubble] Autenticación habilitada para acceder a la interfaz");
             }
         }
-        
+
         // Agregar el middleware de Hubble
         app.UseMiddleware<HubbleMiddleware>();
 
@@ -343,18 +379,18 @@ public static class ServiceCollectionExtensions
     /// <param name="minimumLevel">Nivel mínimo de log a capturar</param>
     /// <returns>Constructor de logging con Hubble configurado</returns>
     public static ILoggingBuilder AddHubbleLogging(this ILoggingBuilder builder, LogLevel minimumLevel = LogLevel.Information)
-    {        
+    {
         // En lugar de intentar resolver IHubbleService directamente, que es un servicio scoped,
         // creamos una factory que resuelve el servicio cuando se necesita, evitando el error
         // "Cannot resolve scoped service from root provider"
-        builder.Services.AddSingleton<ILoggerProvider>(sp => 
+        builder.Services.AddSingleton<ILoggerProvider>(sp =>
         {
             // Crear un provider que obtendrá IHubbleService desde el scope apropiado
             return new HubbleLoggerProvider(
                 () => sp.CreateScope().ServiceProvider.GetRequiredService<IHubbleService>(),
                 minimumLevel);
         });
-        
+
         return builder;
     }
 }
@@ -393,17 +429,17 @@ public class HubbleConfiguration
     /// Habilitar diagnósticos
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
-    
+
     /// <summary>
     /// Habilitar la captura de mensajes de ILogger
     /// </summary>
     public bool CaptureLoggerMessages { get; set; } = false;
-    
+
     /// <summary>
     /// Nivel mínimo de log a capturar
     /// </summary>
     public LogLevel MinimumLogLevel { get; set; } = LogLevel.Information;
-    
+
     /// <summary>
     /// Habilitar la captura de solicitudes HTTP
     /// </summary>
@@ -413,49 +449,54 @@ public class HubbleConfiguration
     /// Indica si se debe habilitar la protección con autenticación
     /// </summary>
     public bool RequireAuthentication { get; set; } = false;
-    
+
     /// <summary>
     /// Nombre de usuario para la autenticación (si RequireAuthentication es true)
     /// </summary>
     public string Username { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Contraseña para la autenticación (si RequireAuthentication es true)
     /// </summary>
     public string Password { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Ruta base para acceder a la interfaz de Hubble
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
-    
+
     /// <summary>
     /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty
     /// </summary>
     public string PrefixPath { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
     /// </summary>
     public bool HighlightNewServices { get; set; } = false;
-    
+
     /// <summary>
     /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
-    
+
     /// <summary>
     /// Activa o desactiva el sistema de limpieza automática de logs antiguos
     /// </summary>
     public bool EnableDataPrune { get; set; } = false;
-    
+
     /// <summary>
     /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs
     /// </summary>
     public int DataPruneIntervalHours { get; set; } = 1;
-    
+
     /// <summary>
     /// Edad máxima en horas que se conservarán los logs antes de ser eliminados
     /// </summary>
     public int MaxLogAgeHours { get; set; } = 24;
-} 
+
+    /// <summary>
+    /// Configuración de seguridad para enmascaramiento de datos sensibles
+    /// </summary>
+    public Gabonet.Hubble.Middleware.SecurityConfiguration Security { get; set; } = new Gabonet.Hubble.Middleware.SecurityConfiguration();
+}
