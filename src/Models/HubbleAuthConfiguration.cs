@@ -94,4 +94,30 @@ public class HubbleAuthConfiguration
     /// Duración en segundos que los nuevos servicios permanecerán destacados
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Configuración de seguridad para enmascaramiento de datos sensibles
+    /// </summary>
+    public SecurityConfiguration Security { get; set; } = new SecurityConfiguration();
+}
+
+/// <summary>
+/// Configuración de seguridad para Hubble
+/// </summary>
+public class SecurityConfiguration
+{
+    /// <summary>
+    /// Claves que activan el enmascaramiento en el JSON body
+    /// </summary>
+    public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
+
+    /// <summary>
+    /// Headers que nunca se mostrarán completos
+    /// </summary>
+    public List<string> MaskHeaders { get; set; } = new List<string> { "Authorization", "X-Api-Key", "Cookie" };
+
+    /// <summary>
+    /// Solo permitir acceso desde estas IPs (VPN/Oficina)
+    /// </summary>
+    public List<string> AllowedIps { get; set; } = new List<string> { "127.0.0.1" };
 }

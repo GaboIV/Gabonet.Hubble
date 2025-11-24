@@ -34,8 +34,8 @@ public class HubbleMiddleware
     /// <param name="serviceProvider">Proveedor de servicios</param>
     /// <param name="options">Opciones de configuración</param>
     public HubbleMiddleware(
-        RequestDelegate next, 
-        IHttpContextAccessor httpContextAccessor, 
+        RequestDelegate next,
+        IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
         HubbleOptions options)
     {
@@ -44,11 +44,11 @@ public class HubbleMiddleware
         _serviceProvider = serviceProvider;
         _options = options;
         _pruneManager = new HubbleDataPruneManager(options);
-        
+
         // Mostrar información de inicialización
         Console.WriteLine($"[Hubble] Servicio inicializado para: {options.ServiceName}");
         Console.WriteLine($"[Hubble] Limpieza automática de datos: {(options.EnableDataPrune ? "Activada" : "Desactivada")}");
-        
+
         if (options.EnableDataPrune)
         {
             Console.WriteLine($"[Hubble] Intervalo de limpieza: {options.DataPruneIntervalHours} hora(s)");
@@ -63,6 +63,14 @@ public class HubbleMiddleware
     /// <returns>Tarea asíncrona</returns>
     public async Task InvokeAsync(HttpContext context)
     {
+        // Verificar si la IP del cliente está permitida
+        if (!IsIpAllowed(context))
+        {
+            context.Response.StatusCode = 403; // Forbidden
+            await context.Response.WriteAsync("Access denied: IP not allowed");
+            return;
+        }
+
         // Verificar si la ruta actual debe ser ignorada
         var path = context.Request.Path.Value?.ToLower();
         if (ShouldIgnoreRequest(context, path))
@@ -87,12 +95,12 @@ public class HubbleMiddleware
             {
                 // Registrar el log al principio y guardarlo en el contexto para que
                 // los loggers puedan asociarse a él
-                try 
+                try
                 {
                     using (var scope = _serviceProvider.CreateScope())
                     {
                         var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
-                        
+
                         // Crear un log inicial que se actualizará más tarde
                         var initialLog = new GeneralLog
                         {
@@ -104,10 +112,10 @@ public class HubbleMiddleware
                             RequestHeaders = FormatHeaders(context.Request.Headers),
                             Timestamp = DateTime.UtcNow
                         };
-                        
+
                         // Guardar el log en la base de datos para obtener su ID
                         await hubbleService.CreateLogAsync(initialLog);
-                        
+
                         // Guardar el log en el contexto HTTP
                         context.Items["Hubble_RequestLog"] = initialLog;
                         requestLog = initialLog;
@@ -123,7 +131,7 @@ public class HubbleMiddleware
 
                 // Capturar la respuesta
                 var response = await FormatResponse(context.Response);
-                
+
                 // Obtener las consultas a bases de datos capturadas
                 var databaseQueries = context.GetDatabaseQueries();
 
@@ -145,10 +153,10 @@ public class HubbleMiddleware
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
                             requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-                            
+
                             string controllerName = "Unknown";
                             string actionName = "Unknown";
-                            
+
                             // Obtener información de controlador y acción si está disponible
                             var routeData = context.GetRouteData();
                             if (routeData != null)
@@ -166,27 +174,27 @@ public class HubbleMiddleware
                                     actionName = actionValue.ToString() ?? "Unknown";
                                 }
                             }
-                            
+
                             requestLog.ControllerName = controllerName;
                             requestLog.ActionName = actionName;
-                            
+
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
                         }
                         else
                         {
                             // Si por alguna razón no existe el log inicial, crear uno nuevo
                             await LogGeneralAsync(
-                                context, 
-                                hubbleService, 
-                                request, 
-                                response, 
-                                false, 
-                                null, 
-                                null, 
-                                databaseQueries, 
+                                context,
+                                hubbleService,
+                                request,
+                                response,
+                                false,
+                                null,
+                                null,
+                                databaseQueries,
                                 executionTime);
                         }
-                        
+
                         // Ejecutar la limpieza de datos históricos si está habilitada
                         await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
@@ -207,7 +215,7 @@ public class HubbleMiddleware
                     Console.WriteLine($"HubbleMiddleware: Error: {ex.Message}");
                     Console.WriteLine($"HubbleMiddleware: StackTrace: {ex.StackTrace}");
                 }
-                
+
                 try
                 {
                     using (var scope = _serviceProvider.CreateScope())
@@ -229,24 +237,24 @@ public class HubbleMiddleware
                             requestLog.ExecutionTime = executionTime;
                             requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
                             requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-                            
+
                             await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
                         }
                         else
                         {
                             // Si no existe el log inicial, crear uno nuevo
                             await LogGeneralAsync(
-                                context, 
-                                hubbleService, 
-                                request, 
-                                null, 
-                                true, 
-                                ex.Message, 
-                                ex.StackTrace, 
-                                databaseQueries, 
+                                context,
+                                hubbleService,
+                                request,
+                                null,
+                                true,
+                                ex.Message,
+                                ex.StackTrace,
+                                databaseQueries,
                                 executionTime);
                         }
-                        
+
                         // Ejecutar la limpieza de datos históricos si está habilitada
                         await _pruneManager.TryPruneDataAsync(hubbleService);
                     }
@@ -259,7 +267,7 @@ public class HubbleMiddleware
                         Console.WriteLine($"HubbleMiddleware: Error al obtener HubbleService para error: {serviceEx.Message}");
                     }
                 }
-                
+
                 throw; // Propagamos la excepción original
             }
             finally
@@ -295,7 +303,7 @@ public class HubbleMiddleware
         {
             var extension = Path.GetExtension(path).ToLower();
             var staticExtensions = new[] { ".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot" };
-            
+
             if (staticExtensions.Contains(extension))
             {
                 return true;
@@ -305,15 +313,95 @@ public class HubbleMiddleware
         return false;
     }
 
+    private bool IsIpAllowed(HttpContext context)
+    {
+        // Si no hay IPs permitidas configuradas, permitir todas
+        if (_options.Security.AllowedIps == null || !_options.Security.AllowedIps.Any())
+        {
+            return true;
+        }
+
+        // Si se permite explícitamente el comodín "*", permitir todas
+        if (_options.Security.AllowedIps.Contains("*"))
+        {
+            return true;
+        }
+
+        var clientIp = context.Connection.RemoteIpAddress?.ToString();
+
+        // Si no se puede obtener la IP, denegar
+        if (string.IsNullOrEmpty(clientIp))
+        {
+            return false;
+        }
+
+        // Normalizar localhost
+        if (clientIp == "::1")
+        {
+            clientIp = "127.0.0.1";
+        }
+
+        // Verificar si la IP está en la lista permitida
+        foreach (var allowedIp in _options.Security.AllowedIps)
+        {
+            if (string.IsNullOrWhiteSpace(allowedIp)) continue;
+
+            if (allowedIp.Contains("/"))
+            {
+                // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
+                var parts = allowedIp.Split('/');
+                if (parts.Length == 2 && int.TryParse(parts[1], out var subnet))
+                {
+                    if (IsIpInSubnet(clientIp, parts[0], subnet))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (clientIp == allowedIp)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpInSubnet(string ip, string network, int subnet)
+    {
+        // Implementación simplificada para IPv4
+        // Para una implementación completa, considerar usar una librería como IPNetwork
+        try
+        {
+            var ipParts = ip.Split('.').Select(int.Parse).ToArray();
+            var networkParts = network.Split('.').Select(int.Parse).ToArray();
+
+            if (ipParts.Length != 4 || networkParts.Length != 4)
+            {
+                return false;
+            }
+
+            var mask = ~(0xFFFFFFFF >> subnet);
+            var ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+            var networkInt = (networkParts[0] << 24) | (networkParts[1] << 16) | (networkParts[2] << 8) | networkParts[3];
+
+            return (ipInt & mask) == (networkInt & mask);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task LogGeneralAsync(
-        HttpContext context, 
-        IHubbleService hubbleService, 
-        string request, 
-        string? response, 
-        bool isError, 
-        string? errorMessage, 
-        string? stackTrace, 
-        List<DatabaseQueryLog> databaseQueries, 
+        HttpContext context,
+        IHubbleService hubbleService,
+        string request,
+        string? response,
+        bool isError,
+        string? errorMessage,
+        string? stackTrace,
+        List<DatabaseQueryLog> databaseQueries,
         long executionTime)
     {
         // Si no está habilitada la captura de logs HTTP, salir
@@ -323,7 +411,7 @@ public class HubbleMiddleware
         }
 
         var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
-        
+
         if (ipAddress == "::1" || ipAddress == "127.0.0.1")
         {
             ipAddress = "Localhost";
@@ -377,7 +465,202 @@ public class HubbleMiddleware
 
         // Guardar el log en la base de datos
         await hubbleService.CreateLogAsync(log);
-        
+            finally
+            {
+            // Copiar la respuesta al stream original
+            await responseBody.CopyToAsync(originalBodyStream);
+        }
+    }
+    }
+
+    private bool ShouldIgnoreRequest(HttpContext context, string? path)
+    {
+        // Ignorar rutas específicas
+        if (_options.IgnorePaths != null && path != null)
+        {
+            foreach (var ignorePath in _options.IgnorePaths)
+            {
+                if (path.StartsWith(ignorePath.ToLower()))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // Ignorar rutas de Hubble
+        if (path != null && (path.StartsWith(_options.BasePath.ToLower()) || path.StartsWith("/api/hubble")))
+        {
+            return true;
+        }
+
+        // Ignorar extensiones de archivos estáticos
+        if (_options.IgnoreStaticFiles && path != null)
+        {
+            var extension = Path.GetExtension(path).ToLower();
+            var staticExtensions = new[] { ".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot" };
+
+            if (staticExtensions.Contains(extension))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpAllowed(HttpContext context)
+    {
+        // Si no hay IPs permitidas configuradas, permitir todas
+        if (_options.Security.AllowedIps == null || !_options.Security.AllowedIps.Any())
+        {
+            return true;
+        }
+
+        // Si se permite explícitamente el comodín "*", permitir todas
+        if (_options.Security.AllowedIps.Contains("*"))
+        {
+            return true;
+        }
+
+        var clientIp = context.Connection.RemoteIpAddress?.ToString();
+
+        // Si no se puede obtener la IP, denegar
+        if (string.IsNullOrEmpty(clientIp))
+        {
+            return false;
+        }
+
+        // Normalizar localhost
+        if (clientIp == "::1")
+        {
+            clientIp = "127.0.0.1";
+        }
+
+        // Verificar si la IP está en la lista permitida
+        foreach (var allowedIp in _options.Security.AllowedIps)
+        {
+            if (string.IsNullOrWhiteSpace(allowedIp)) continue;
+
+            if (allowedIp.Contains("/"))
+            {
+                // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
+                var parts = allowedIp.Split('/');
+                if (parts.Length == 2 && int.TryParse(parts[1], out var subnet))
+                {
+                    if (IsIpInSubnet(clientIp, parts[0], subnet))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (clientIp == allowedIp)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpInSubnet(string ip, string network, int subnet)
+    {
+        // Implementación simplificada para IPv4
+        // Para una implementación completa, considerar usar una librería como IPNetwork
+        try
+        {
+            var ipParts = ip.Split('.').Select(int.Parse).ToArray();
+            var networkParts = network.Split('.').Select(int.Parse).ToArray();
+
+            if (ipParts.Length != 4 || networkParts.Length != 4)
+            {
+                return false;
+            }
+
+            var mask = ~(0xFFFFFFFF >> subnet);
+            var ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+            var networkInt = (networkParts[0] << 24) | (networkParts[1] << 16) | (networkParts[2] << 8) | networkParts[3];
+
+            return (ipInt & mask) == (networkInt & mask);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task LogGeneralAsync(
+        HttpContext context,
+        IHubbleService hubbleService,
+        string request,
+        string? response,
+        bool isError,
+        string? errorMessage,
+        string? stackTrace,
+        List<DatabaseQueryLog> databaseQueries,
+        long executionTime)
+    {
+        // Si no está habilitada la captura de logs HTTP, salir
+        if (!_options.CaptureHttpRequests)
+        {
+            return;
+        }
+
+        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+
+        if (ipAddress == "::1" || ipAddress == "127.0.0.1")
+        {
+            ipAddress = "Localhost";
+        }
+        else if (string.IsNullOrEmpty(ipAddress))
+        {
+            ipAddress = "IP not available";
+        }
+
+        string controllerName = "Unknown";
+        string actionName = "Unknown";
+
+        // Obtener información de controlador y acción si está disponible
+        var routeData = context.GetRouteData();
+        if (routeData != null)
+        {
+            var controllerValue = routeData.Values["controller"];
+            var actionValue = routeData.Values["action"];
+
+            if (controllerValue != null)
+            {
+                controllerName = controllerValue.ToString() ?? "Unknown";
+            }
+
+            if (actionValue != null)
+            {
+                actionName = actionValue.ToString() ?? "Unknown";
+            }
+        }
+
+        var log = new GeneralLog
+        {
+            ServiceName = _options.ServiceName,
+            ControllerName = controllerName,
+            ActionName = actionName,
+            HttpUrl = context.Request.Path,
+            QueryParams = context.Request.QueryString.Value ?? string.Empty,
+            Method = context.Request.Method,
+            RequestData = request,
+            ResponseData = response,
+            RequestHeaders = FormatHeaders(context.Request.Headers),
+            StatusCode = context.Response.StatusCode,
+            IsError = isError,
+            ErrorMessage = errorMessage,
+            StackTrace = stackTrace,
+            IpAddress = ipAddress,
+            Timestamp = DateTime.UtcNow,
+            ExecutionTime = executionTime,
+            DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList()
+        };
+
+        // Guardar el log en la base de datos
+        await hubbleService.CreateLogAsync(log);
+
         // Guardar el log en el contexto HTTP para que los logs de ILogger puedan referenciarlo
         context.Items["Hubble_RequestLog"] = log;
     }
@@ -395,7 +678,15 @@ public class HubbleMiddleware
             var buffer = new byte[Convert.ToInt32(request.ContentLength)];
             await request.Body.ReadAsync(buffer, 0, buffer.Length);
             request.Body.Position = 0;
-            return Encoding.UTF8.GetString(buffer);
+            var requestBody = Encoding.UTF8.GetString(buffer);
+
+            // Combinar propiedades de body y request body para el enmascaramiento de la solicitud
+            var maskProperties = _options.Security.MaskBodyProperties
+                .Union(_options.Security.MaskRequestBodyProperties)
+                .ToList();
+
+            // Aplicar enmascaramiento de datos sensibles usando las propiedades configuradas
+            return MaskJsonBody(requestBody, maskProperties);
         }
         catch
         {
@@ -411,18 +702,87 @@ public class HubbleMiddleware
             response.Body.Seek(0, SeekOrigin.Begin);
             var text = await new StreamReader(response.Body).ReadToEndAsync();
             response.Body.Seek(0, SeekOrigin.Begin);
-            return text;
+
+            // Combinar propiedades de body y response body para el enmascaramiento de la respuesta
+            var maskProperties = _options.Security.MaskBodyProperties
+                .Union(_options.Security.MaskResponseBodyProperties)
+                .ToList();
+
+            // Aplicar enmascaramiento de datos sensibles
+            return MaskJsonBody(text, maskProperties);
         }
         catch
         {
             return string.Empty;
         }
     }
-    
+
     private string FormatHeaders(IHeaderDictionary headers)
     {
         var formattedHeaders = headers.ToDictionary(h => h.Key, h => h.Value.ToString());
+
+        // Enmascarar headers sensibles (case-insensitive)
+        foreach (var headerKey in _options.Security.MaskHeaders)
+        {
+            var keyToMask = formattedHeaders.Keys.FirstOrDefault(k => k.Equals(headerKey, StringComparison.OrdinalIgnoreCase));
+            if (keyToMask != null)
+            {
+                formattedHeaders[keyToMask] = "*****";
+            }
+        }
+
         return JsonConvert.SerializeObject(formattedHeaders);
+    }
+
+    private string MaskJsonBody(string jsonBody, List<string> maskProperties)
+    {
+        if (string.IsNullOrEmpty(jsonBody))
+        {
+            return jsonBody;
+        }
+
+        try
+        {
+            var jsonObject = JsonConvert.DeserializeObject(jsonBody);
+            if (jsonObject == null)
+            {
+                return jsonBody;
+            }
+
+            MaskJsonObject(jsonObject, maskProperties);
+            return JsonConvert.SerializeObject(jsonObject);
+        }
+        catch
+        {
+            // Si no es JSON válido, devolver sin cambios
+            return jsonBody;
+        }
+    }
+
+    private void MaskJsonObject(object obj, List<string> maskProperties)
+    {
+        if (obj is Newtonsoft.Json.Linq.JObject jObject)
+        {
+            foreach (var property in jObject.Properties().ToList())
+            {
+                // Verificar si la propiedad debe ser enmascarada (case-insensitive)
+                if (maskProperties.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    property.Value = "*****";
+                }
+                else
+                {
+                    MaskJsonObject(property.Value, maskProperties);
+                }
+            }
+        }
+        else if (obj is Newtonsoft.Json.Linq.JArray jArray)
+        {
+            foreach (var item in jArray)
+            {
+                MaskJsonObject(item, maskProperties);
+            }
+        }
     }
 }
 
@@ -450,7 +810,7 @@ public class HubbleOptions
     /// Indica si se deben mostrar mensajes de diagnóstico en la consola.
     /// </summary>
     public bool EnableDiagnostics { get; set; } = false;
-    
+
     /// <summary>
     /// Indica si se deben capturar los mensajes de ILogger.
     /// </summary>
@@ -460,59 +820,97 @@ public class HubbleOptions
     /// Indica si se deben capturar las solicitudes HTTP.
     /// </summary>
     public bool CaptureHttpRequests { get; set; } = true;
-    
+
     /// <summary>
     /// Indica si se debe requerir autenticación para acceder a la interfaz de Hubble.
     /// </summary>
     public bool RequireAuthentication { get; set; } = false;
-    
+
     /// <summary>
     /// Nombre de usuario para la autenticación (si RequireAuthentication es true).
     /// </summary>
     public string Username { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Contraseña para la autenticación (si RequireAuthentication es true).
     /// </summary>
     public string Password { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
     /// </summary>
     public string BasePath { get; set; } = "/hubble";
-    
+
     /// <summary>
     /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty.
     /// </summary>
     public string PrefixPath { get; set; } = string.Empty;
-    
+
     /// <summary>
     /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
     /// </summary>
     public bool HighlightNewServices { get; set; } = false;
-    
+
     /// <summary>
     /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
     /// </summary>
     public int HighlightDurationSeconds { get; set; } = 5;
-    
+
     /// <summary>
     /// Activa o desactiva el sistema de limpieza automática de logs antiguos.
     /// </summary>
     public bool EnableDataPrune { get; set; } = false;
-    
+
     /// <summary>
     /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs.
     /// </summary>
     public int DataPruneIntervalHours { get; set; } = 1;
-    
+
     /// <summary>
     /// Edad máxima en horas que se conservarán los logs antes de ser eliminados.
     /// </summary>
     public int MaxLogAgeHours { get; set; } = 24;
-    
+
     /// <summary>
     /// ID de la zona horaria para mostrar las fechas. Si está vacío, se usará UTC.
     /// </summary>
     public string TimeZoneId { get; set; } = string.Empty;
-} 
+
+    /// <summary>
+    /// Configuración de seguridad para enmascaramiento de datos sensibles
+    /// </summary>
+    public SecurityConfiguration Security { get; set; } = new SecurityConfiguration();
+}
+
+/// <summary>
+/// Configuración de seguridad para Hubble
+/// </summary>
+public class SecurityConfiguration
+{
+    /// <summary>
+    /// Claves que activan el enmascaramiento en el JSON body de las solicitudes (request) y respuestas (response).
+    /// </summary>
+    public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
+
+    /// <summary>
+    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las solicitudes (request).
+    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de solicitudes.
+    /// </summary>
+    public List<string> MaskRequestBodyProperties { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las respuestas (response).
+    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de respuestas.
+    /// </summary>
+    public List<string> MaskResponseBodyProperties { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Headers que nunca se mostrarán completos
+    /// </summary>
+    public List<string> MaskHeaders { get; set; } = new List<string> { "Authorization", "X-Api-Key", "Cookie" };
+
+    /// <summary>
+    /// Solo permitir acceso desde estas IPs (VPN/Oficina)
+    /// </summary>
+    public List<string> AllowedIps { get; set; } = new List<string>();
+}
