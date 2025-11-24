@@ -485,8 +485,8 @@ public class HubbleMiddleware
             request.Body.Position = 0;
             var requestBody = Encoding.UTF8.GetString(buffer);
 
-            // Aplicar enmascaramiento de datos sensibles
-            return MaskJsonBody(requestBody);
+            // Aplicar enmascaramiento de datos sensibles usando las propiedades configuradas para el body
+            return MaskJsonBody(requestBody, _options.Security.MaskBodyProperties);
         }
         catch
         {
@@ -503,8 +503,13 @@ public class HubbleMiddleware
             var text = await new StreamReader(response.Body).ReadToEndAsync();
             response.Body.Seek(0, SeekOrigin.Begin);
 
+            // Combinar propiedades de body y response body para el enmascaramiento de la respuesta
+            var maskProperties = _options.Security.MaskBodyProperties
+                .Union(_options.Security.MaskResponseBodyProperties)
+                .ToList();
+
             // Aplicar enmascaramiento de datos sensibles
-            return MaskJsonBody(text);
+            return MaskJsonBody(text, maskProperties);
         }
         catch
         {
@@ -516,19 +521,20 @@ public class HubbleMiddleware
     {
         var formattedHeaders = headers.ToDictionary(h => h.Key, h => h.Value.ToString());
 
-        // Enmascarar headers sensibles
+        // Enmascarar headers sensibles (case-insensitive)
         foreach (var headerKey in _options.Security.MaskHeaders)
         {
-            if (formattedHeaders.ContainsKey(headerKey))
+            var keyToMask = formattedHeaders.Keys.FirstOrDefault(k => k.Equals(headerKey, StringComparison.OrdinalIgnoreCase));
+            if (keyToMask != null)
             {
-                formattedHeaders[headerKey] = "*****";
+                formattedHeaders[keyToMask] = "*****";
             }
         }
 
         return JsonConvert.SerializeObject(formattedHeaders);
     }
 
-    private string MaskJsonBody(string jsonBody)
+    private string MaskJsonBody(string jsonBody, List<string> maskProperties)
     {
         if (string.IsNullOrEmpty(jsonBody))
         {
@@ -543,7 +549,7 @@ public class HubbleMiddleware
                 return jsonBody;
             }
 
-            MaskJsonObject(jsonObject);
+            MaskJsonObject(jsonObject, maskProperties);
             return JsonConvert.SerializeObject(jsonObject);
         }
         catch
@@ -553,19 +559,20 @@ public class HubbleMiddleware
         }
     }
 
-    private void MaskJsonObject(object obj)
+    private void MaskJsonObject(object obj, List<string> maskProperties)
     {
         if (obj is Newtonsoft.Json.Linq.JObject jObject)
         {
             foreach (var property in jObject.Properties().ToList())
             {
-                if (_options.Security.MaskBodyProperties.Contains(property.Name.ToLower()))
+                // Verificar si la propiedad debe ser enmascarada (case-insensitive)
+                if (maskProperties.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
                 {
                     property.Value = "*****";
                 }
                 else
                 {
-                    MaskJsonObject(property.Value);
+                    MaskJsonObject(property.Value, maskProperties);
                 }
             }
         }
@@ -573,7 +580,7 @@ public class HubbleMiddleware
         {
             foreach (var item in jArray)
             {
-                MaskJsonObject(item);
+                MaskJsonObject(item, maskProperties);
             }
         }
     }
@@ -681,9 +688,15 @@ public class HubbleOptions
 public class SecurityConfiguration
 {
     /// <summary>
-    /// Claves que activan el enmascaramiento en el JSON body
+    /// Claves que activan el enmascaramiento en el JSON body de las solicitudes (request).
     /// </summary>
     public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
+
+    /// <summary>
+    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las respuestas (response).
+    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de respuestas.
+    /// </summary>
+    public List<string> MaskResponseBodyProperties { get; set; } = new List<string>();
 
     /// <summary>
     /// Headers que nunca se mostrarán completos
