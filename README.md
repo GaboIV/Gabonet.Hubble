@@ -88,6 +88,96 @@ services.AddHubble(options =>
     
     // Rutas a ignorar
     options.IgnorePaths = new List<string>
+# Hubble para .NET
+
+Hubble es una biblioteca para monitoreo y logging de aplicaciones .NET que permite capturar y visualizar solicitudes HTTP, logs de ILogger y consultas a bases de datos en una interfaz web integrada.
+
+## Configuración
+
+### 1. Instalación
+
+Añade Hubble a tu proyecto:
+
+```bash
+dotnet add package Gabonet.Hubble
+```
+
+### 2. Configuración en Program.cs
+
+```csharp
+// Program.cs o Startup.cs
+using Gabonet.Hubble.Extensions;
+using Microsoft.Extensions.Logging;
+
+// ...
+
+// Agregar Hubble con la configuración necesaria
+builder.Services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017"; // Requerido: Conexión a MongoDB
+    options.DatabaseName = "HubbleDB";                      // Requerido: Nombre de la base de datos
+    options.ServiceName = "MiAplicación";                   // Opcional: Nombre del servicio
+    options.TimeZoneId = "Romance Standard Time";           // Opcional: Zona horaria para mostrar logs
+    options.EnableDiagnostics = true;                       // Opcional: Mostrar mensajes de diagnóstico
+    options.CaptureLoggerMessages = true;                   // Opcional: Capturar logs de ILogger (true por defecto)
+    options.BasePath = "/logs";                             // Opcional: Ruta personalizada para acceder a Hubble (por defecto: /hubble)
+});
+
+// Añadir el proveedor de logs de Hubble para capturar los logs de ILogger
+builder.Logging.AddHubbleLogging(LogLevel.Information);  // Puedes cambiar el nivel mínimo de logs
+
+// ...
+
+// Agregar el middleware de Hubble (debe ir antes de app.UseRouting())
+app.UseHubble();
+```
+
+### Ignorar rutas específicas
+
+Hubble permite configurar rutas específicas que serán ignoradas por el middleware, lo que es útil para endpoints como health checks, métricas o cualquier otra ruta que no desees monitorear.
+
+```csharp
+services.AddHubble(options =>
+{
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "hubble";
+    options.ServiceName = "MiServicio";
+
+    // Configurar rutas a ignorar
+    options.IgnorePaths = new List<string>
+    {
+        "/health",
+        "/metrics",
+        "/test",
+        "/swagger"
+    };
+});
+```
+
+Todas las rutas que comiencen con cualquiera de los prefijos especificados en `IgnorePaths` serán ignoradas por el middleware de Hubble. Por ejemplo, si especificas `/health`, se ignorarán rutas como `/health`, `/health/status`, `/health/check`, etc.
+
+### Ejemplo completo de configuración
+
+```csharp
+services.AddHubble(options =>
+{
+    // Configuración obligatoria
+    options.ConnectionString = "mongodb://localhost:27017";
+    options.DatabaseName = "hubble";
+    
+    // Configuración general
+    options.ServiceName = "MiServicio";
+    options.BasePath = "/hubble";
+    options.TimeZoneId = "America/Argentina/Buenos_Aires";
+    options.EnableDiagnostics = false;
+    
+    // Captura de datos
+    options.CaptureLoggerMessages = true;
+    options.CaptureHttpRequests = true;
+    options.IgnoreStaticFiles = true;
+    
+    // Rutas a ignorar
+    options.IgnorePaths = new List<string>
     {
         "/health",
         "/metrics",
@@ -101,6 +191,9 @@ services.AddHubble(options =>
         // Se aplica tanto a Request como a Response
         MaskBodyProperties = new List<string> { "password", "token", "tarjeta", "cvv" },
         
+        // Propiedades adicionales para enmascarar SOLO en el Request
+        MaskRequestBodyProperties = new List<string> { "pin", "clave" },
+
         // Propiedades adicionales para enmascarar SOLO en el Response
         MaskResponseBodyProperties = new List<string> { "internalId", "secretData" },
         
@@ -137,6 +230,7 @@ app.UseHubble();
 Hubble permite proteger información sensible en los logs mediante enmascaramiento:
 - **Case-Insensitive**: El enmascaramiento no distingue entre mayúsculas y minúsculas (ej. "password", "Password", "PASSWORD" serán enmascarados).
 - **Body Request/Response**: `MaskBodyProperties` aplica a ambos.
+- **Request Específico**: `MaskRequestBodyProperties` permite definir campos que solo deben ocultarse en la solicitud.
 - **Response Específico**: `MaskResponseBodyProperties` permite definir campos que solo deben ocultarse en la respuesta.
 - **Headers**: `MaskHeaders` protege cabeceras sensibles como tokens de autorización.
 
@@ -652,6 +746,9 @@ builder.Services.AddHubble(options =>
         // Applies to both Request and Response bodies
         MaskBodyProperties = new List<string> { "password", "token", "creditCard" },
         
+        // Additional properties to mask ONLY in the Request body
+        MaskRequestBodyProperties = new List<string> { "pin", "secretKey" },
+
         // Additional properties to mask ONLY in the Response body
         MaskResponseBodyProperties = new List<string> { "internalId", "secretData" },
         
@@ -685,6 +782,7 @@ builder.Services.AddHubble(options =>
 Hubble helps protect sensitive information in your logs:
 - **Case-Insensitive**: Masking is case-insensitive (e.g., "password", "Password", "PASSWORD" will all be masked).
 - **Request/Response Body**: `MaskBodyProperties` applies to both request and response bodies.
+- **Request Specific**: `MaskRequestBodyProperties` allows you to define fields that should only be masked in the request.
 - **Response Specific**: `MaskResponseBodyProperties` allows you to define fields that should only be masked in the response.
 - **Headers**: `MaskHeaders` protects sensitive headers like authorization tokens.
 

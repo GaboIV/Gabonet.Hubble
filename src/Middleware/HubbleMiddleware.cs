@@ -465,6 +465,201 @@ public class HubbleMiddleware
 
         // Guardar el log en la base de datos
         await hubbleService.CreateLogAsync(log);
+            finally
+            {
+            // Copiar la respuesta al stream original
+            await responseBody.CopyToAsync(originalBodyStream);
+        }
+    }
+    }
+
+    private bool ShouldIgnoreRequest(HttpContext context, string? path)
+    {
+        // Ignorar rutas específicas
+        if (_options.IgnorePaths != null && path != null)
+        {
+            foreach (var ignorePath in _options.IgnorePaths)
+            {
+                if (path.StartsWith(ignorePath.ToLower()))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // Ignorar rutas de Hubble
+        if (path != null && (path.StartsWith(_options.BasePath.ToLower()) || path.StartsWith("/api/hubble")))
+        {
+            return true;
+        }
+
+        // Ignorar extensiones de archivos estáticos
+        if (_options.IgnoreStaticFiles && path != null)
+        {
+            var extension = Path.GetExtension(path).ToLower();
+            var staticExtensions = new[] { ".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot" };
+
+            if (staticExtensions.Contains(extension))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpAllowed(HttpContext context)
+    {
+        // Si no hay IPs permitidas configuradas, permitir todas
+        if (_options.Security.AllowedIps == null || !_options.Security.AllowedIps.Any())
+        {
+            return true;
+        }
+
+        // Si se permite explícitamente el comodín "*", permitir todas
+        if (_options.Security.AllowedIps.Contains("*"))
+        {
+            return true;
+        }
+
+        var clientIp = context.Connection.RemoteIpAddress?.ToString();
+
+        // Si no se puede obtener la IP, denegar
+        if (string.IsNullOrEmpty(clientIp))
+        {
+            return false;
+        }
+
+        // Normalizar localhost
+        if (clientIp == "::1")
+        {
+            clientIp = "127.0.0.1";
+        }
+
+        // Verificar si la IP está en la lista permitida
+        foreach (var allowedIp in _options.Security.AllowedIps)
+        {
+            if (string.IsNullOrWhiteSpace(allowedIp)) continue;
+
+            if (allowedIp.Contains("/"))
+            {
+                // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
+                var parts = allowedIp.Split('/');
+                if (parts.Length == 2 && int.TryParse(parts[1], out var subnet))
+                {
+                    if (IsIpInSubnet(clientIp, parts[0], subnet))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (clientIp == allowedIp)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpInSubnet(string ip, string network, int subnet)
+    {
+        // Implementación simplificada para IPv4
+        // Para una implementación completa, considerar usar una librería como IPNetwork
+        try
+        {
+            var ipParts = ip.Split('.').Select(int.Parse).ToArray();
+            var networkParts = network.Split('.').Select(int.Parse).ToArray();
+
+            if (ipParts.Length != 4 || networkParts.Length != 4)
+            {
+                return false;
+            }
+
+            var mask = ~(0xFFFFFFFF >> subnet);
+            var ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+            var networkInt = (networkParts[0] << 24) | (networkParts[1] << 16) | (networkParts[2] << 8) | networkParts[3];
+
+            return (ipInt & mask) == (networkInt & mask);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task LogGeneralAsync(
+        HttpContext context,
+        IHubbleService hubbleService,
+        string request,
+        string? response,
+        bool isError,
+        string? errorMessage,
+        string? stackTrace,
+        List<DatabaseQueryLog> databaseQueries,
+        long executionTime)
+    {
+        // Si no está habilitada la captura de logs HTTP, salir
+        if (!_options.CaptureHttpRequests)
+        {
+            return;
+        }
+
+        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+
+        if (ipAddress == "::1" || ipAddress == "127.0.0.1")
+        {
+            ipAddress = "Localhost";
+        }
+        else if (string.IsNullOrEmpty(ipAddress))
+        {
+            ipAddress = "IP not available";
+        }
+
+        string controllerName = "Unknown";
+        string actionName = "Unknown";
+
+        // Obtener información de controlador y acción si está disponible
+        var routeData = context.GetRouteData();
+        if (routeData != null)
+        {
+            var controllerValue = routeData.Values["controller"];
+            var actionValue = routeData.Values["action"];
+
+            if (controllerValue != null)
+            {
+                controllerName = controllerValue.ToString() ?? "Unknown";
+            }
+
+            if (actionValue != null)
+            {
+                actionName = actionValue.ToString() ?? "Unknown";
+            }
+        }
+
+        var log = new GeneralLog
+        {
+            ServiceName = _options.ServiceName,
+            ControllerName = controllerName,
+            ActionName = actionName,
+            HttpUrl = context.Request.Path,
+            QueryParams = context.Request.QueryString.Value ?? string.Empty,
+            Method = context.Request.Method,
+            RequestData = request,
+            ResponseData = response,
+            RequestHeaders = FormatHeaders(context.Request.Headers),
+            StatusCode = context.Response.StatusCode,
+            IsError = isError,
+            ErrorMessage = errorMessage,
+            StackTrace = stackTrace,
+            IpAddress = ipAddress,
+            Timestamp = DateTime.UtcNow,
+            ExecutionTime = executionTime,
+            DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList()
+        };
+
+        // Guardar el log en la base de datos
+        await hubbleService.CreateLogAsync(log);
 
         // Guardar el log en el contexto HTTP para que los logs de ILogger puedan referenciarlo
         context.Items["Hubble_RequestLog"] = log;
@@ -485,8 +680,13 @@ public class HubbleMiddleware
             request.Body.Position = 0;
             var requestBody = Encoding.UTF8.GetString(buffer);
 
-            // Aplicar enmascaramiento de datos sensibles usando las propiedades configuradas para el body
-            return MaskJsonBody(requestBody, _options.Security.MaskBodyProperties);
+            // Combinar propiedades de body y request body para el enmascaramiento de la solicitud
+            var maskProperties = _options.Security.MaskBodyProperties
+                .Union(_options.Security.MaskRequestBodyProperties)
+                .ToList();
+
+            // Aplicar enmascaramiento de datos sensibles usando las propiedades configuradas
+            return MaskJsonBody(requestBody, maskProperties);
         }
         catch
         {
@@ -688,9 +888,15 @@ public class HubbleOptions
 public class SecurityConfiguration
 {
     /// <summary>
-    /// Claves que activan el enmascaramiento en el JSON body de las solicitudes (request).
+    /// Claves que activan el enmascaramiento en el JSON body de las solicitudes (request) y respuestas (response).
     /// </summary>
     public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
+
+    /// <summary>
+    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las solicitudes (request).
+    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de solicitudes.
+    /// </summary>
+    public List<string> MaskRequestBodyProperties { get; set; } = new List<string>();
 
     /// <summary>
     /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las respuestas (response).
