@@ -63,6 +63,14 @@ public class HubbleMiddleware
     /// <returns>Tarea asíncrona</returns>
     public async Task InvokeAsync(HttpContext context)
     {
+        // Verificar si la IP del cliente está permitida
+        if (!IsIpAllowed(context))
+        {
+            context.Response.StatusCode = 403; // Forbidden
+            await context.Response.WriteAsync("Access denied: IP not allowed");
+            return;
+        }
+
         // Verificar si la ruta actual debe ser ignorada
         var path = context.Request.Path.Value?.ToLower();
         if (ShouldIgnoreRequest(context, path))
@@ -295,7 +303,7 @@ public class HubbleMiddleware
         {
             var extension = Path.GetExtension(path).ToLower();
             var staticExtensions = new[] { ".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot" };
-            
+
             if (staticExtensions.Contains(extension))
             {
                 return true;
@@ -303,6 +311,78 @@ public class HubbleMiddleware
         }
 
         return false;
+    }
+
+    private bool IsIpAllowed(HttpContext context)
+    {
+        // Si no hay IPs permitidas configuradas, permitir todas
+        if (_options.Security.AllowedIps == null || !_options.Security.AllowedIps.Any())
+        {
+            return true;
+        }
+
+        var clientIp = context.Connection.RemoteIpAddress?.ToString();
+
+        // Si no se puede obtener la IP, denegar
+        if (string.IsNullOrEmpty(clientIp))
+        {
+            return false;
+        }
+
+        // Normalizar localhost
+        if (clientIp == "::1")
+        {
+            clientIp = "127.0.0.1";
+        }
+
+        // Verificar si la IP está en la lista permitida
+        foreach (var allowedIp in _options.Security.AllowedIps)
+        {
+            if (allowedIp.Contains("/"))
+            {
+                // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
+                var parts = allowedIp.Split('/');
+                if (parts.Length == 2 && int.TryParse(parts[1], out var subnet))
+                {
+                    if (IsIpInSubnet(clientIp, parts[0], subnet))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else if (clientIp == allowedIp)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsIpInSubnet(string ip, string network, int subnet)
+    {
+        // Implementación simplificada para IPv4
+        // Para una implementación completa, considerar usar una librería como IPNetwork
+        try
+        {
+            var ipParts = ip.Split('.').Select(int.Parse).ToArray();
+            var networkParts = network.Split('.').Select(int.Parse).ToArray();
+
+            if (ipParts.Length != 4 || networkParts.Length != 4)
+            {
+                return false;
+            }
+
+            var mask = ~(0xFFFFFFFF >> subnet);
+            var ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+            var networkInt = (networkParts[0] << 24) | (networkParts[1] << 16) | (networkParts[2] << 8) | networkParts[3];
+
+            return (ipInt & mask) == (networkInt & mask);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task LogGeneralAsync(
@@ -395,7 +475,10 @@ public class HubbleMiddleware
             var buffer = new byte[Convert.ToInt32(request.ContentLength)];
             await request.Body.ReadAsync(buffer, 0, buffer.Length);
             request.Body.Position = 0;
-            return Encoding.UTF8.GetString(buffer);
+            var requestBody = Encoding.UTF8.GetString(buffer);
+
+            // Aplicar enmascaramiento de datos sensibles
+            return MaskJsonBody(requestBody);
         }
         catch
         {
@@ -411,7 +494,9 @@ public class HubbleMiddleware
             response.Body.Seek(0, SeekOrigin.Begin);
             var text = await new StreamReader(response.Body).ReadToEndAsync();
             response.Body.Seek(0, SeekOrigin.Begin);
-            return text;
+
+            // Aplicar enmascaramiento de datos sensibles
+            return MaskJsonBody(text);
         }
         catch
         {
@@ -422,7 +507,67 @@ public class HubbleMiddleware
     private string FormatHeaders(IHeaderDictionary headers)
     {
         var formattedHeaders = headers.ToDictionary(h => h.Key, h => h.Value.ToString());
+
+        // Enmascarar headers sensibles
+        foreach (var headerKey in _options.Security.MaskHeaders)
+        {
+            if (formattedHeaders.ContainsKey(headerKey))
+            {
+                formattedHeaders[headerKey] = "*****";
+            }
+        }
+
         return JsonConvert.SerializeObject(formattedHeaders);
+    }
+
+    private string MaskJsonBody(string jsonBody)
+    {
+        if (string.IsNullOrEmpty(jsonBody))
+        {
+            return jsonBody;
+        }
+
+        try
+        {
+            var jsonObject = JsonConvert.DeserializeObject(jsonBody);
+            if (jsonObject == null)
+            {
+                return jsonBody;
+            }
+
+            MaskJsonObject(jsonObject);
+            return JsonConvert.SerializeObject(jsonObject);
+        }
+        catch
+        {
+            // Si no es JSON válido, devolver sin cambios
+            return jsonBody;
+        }
+    }
+
+    private void MaskJsonObject(object obj)
+    {
+        if (obj is Newtonsoft.Json.Linq.JObject jObject)
+        {
+            foreach (var property in jObject.Properties().ToList())
+            {
+                if (_options.Security.MaskBodyProperties.Contains(property.Name.ToLower()))
+                {
+                    property.Value = "*****";
+                }
+                else
+                {
+                    MaskJsonObject(property.Value);
+                }
+            }
+        }
+        else if (obj is Newtonsoft.Json.Linq.JArray jArray)
+        {
+            foreach (var item in jArray)
+            {
+                MaskJsonObject(item);
+            }
+        }
     }
 }
 
@@ -515,4 +660,30 @@ public class HubbleOptions
     /// ID de la zona horaria para mostrar las fechas. Si está vacío, se usará UTC.
     /// </summary>
     public string TimeZoneId { get; set; } = string.Empty;
-} 
+
+    /// <summary>
+    /// Configuración de seguridad para enmascaramiento de datos sensibles
+    /// </summary>
+    public SecurityConfiguration Security { get; set; } = new SecurityConfiguration();
+}
+
+/// <summary>
+/// Configuración de seguridad para Hubble
+/// </summary>
+public class SecurityConfiguration
+{
+    /// <summary>
+    /// Claves que activan el enmascaramiento en el JSON body
+    /// </summary>
+    public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
+
+    /// <summary>
+    /// Headers que nunca se mostrarán completos
+    /// </summary>
+    public List<string> MaskHeaders { get; set; } = new List<string> { "Authorization", "X-Api-Key", "Cookie" };
+
+    /// <summary>
+    /// Solo permitir acceso desde estas IPs (VPN/Oficina)
+    /// </summary>
+    public List<string> AllowedIps { get; set; } = new List<string> { "127.0.0.1" };
+}
