@@ -6,6 +6,7 @@ using Gabonet.Hubble.Middleware;
 using Gabonet.Hubble.Models;
 using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI;
+using Gabonet.Hubble.Utilities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -55,7 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<HubbleController>();
 
         // Registrar las opciones
-        services.AddSingleton(new HubbleOptions
+        var options = new HubbleOptions
         {
             ServiceName = serviceName,
             // Activar por defecto la captura de logs
@@ -66,7 +67,12 @@ public static class ServiceCollectionExtensions
             HighlightDurationSeconds = 5,
             IgnorePaths = new List<string>(),
             TimeZoneId = timeZoneId ?? string.Empty
-        });
+        };
+        
+        services.AddSingleton(options);
+        
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
 
         return services;
     }
@@ -232,6 +238,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(options);
 
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
+
         // Registrar el servicio de Hubble
         services.AddScoped<IHubbleService>(provider =>
         {
@@ -319,6 +328,9 @@ public static class ServiceCollectionExtensions
         };
 
         services.AddSingleton(options);
+
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
 
         // Registrar el servicio de Hubble
         services.AddScoped<IHubbleService>(provider =>

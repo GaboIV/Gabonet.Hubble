@@ -289,6 +289,121 @@ public class MiControlador : Controller
 
 Cuando accedas a la página de detalles de una solicitud HTTP en `/hubble/detail/{id}`, verás una sección llamada "Logger" que muestra todos los logs de ILogger relacionados con esa solicitud, agrupados por categoría (namespace del logger).
 
+### Enmascaramiento de datos en logs personalizados
+
+Hubble proporciona una utilidad para enmascarar datos sensibles en tus propios logs, utilizando la misma configuración de enmascaramiento que se aplica a las solicitudes y respuestas HTTP.
+
+#### Uso del Helper de Enmascaramiento
+
+```csharp
+using Gabonet.Hubble.Utilities;
+
+public class PlayerService
+{
+    private readonly ILogger<PlayerService> _logger;
+    private readonly IPlayerRepository _playerRepository;
+
+    public PlayerService(
+        ILogger<PlayerService> logger,
+        IPlayerRepository playerRepository)
+    {
+        _logger = logger;
+        _playerRepository = playerRepository;
+    }
+
+    public async Task<PlayerDto> CreatePlayerAsync(PlayerDto playerDto)
+    {
+        var player = MapToEntity(playerDto);
+        player.Id = Guid.NewGuid();
+        
+        // Use HubbleMaskingHelper to serialize and mask sensitive data
+        _logger.LogInformation("Creating player: {Player}", 
+            HubbleMaskingHelper.SerializeMasked(playerDto));
+        
+        var createdPlayer = await _playerRepository.AddAsync(player);
+        
+        // Also works with entity objects
+        _logger.LogInformation("Player created: {Player}", 
+            HubbleMaskingHelper.SerializeMasked(createdPlayer));
+        
+        return MapToDto(createdPlayer);
+    }
+}
+```
+
+#### Métodos disponibles
+
+**`SerializeMasked<T>(T obj, List<string>? additionalMaskProperties = null, bool indent = false)`**
+
+Serializa un objeto a JSON y enmascara las propiedades sensibles según la configuración de Hubble.
+
+```csharp
+// Basic usage
+var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject);
+
+// With additional properties to mask
+var maskedJson = HubbleMaskingHelper.SerializeMasked(
+    myObject, 
+    new List<string> { "customField", "secretData" }
+);
+
+// With indented JSON for better readability
+var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject, indent: true);
+```
+
+**`MaskJson(string jsonString, List<string>? additionalMaskProperties = null)`**
+
+Enmascara propiedades sensibles en un string JSON ya serializado.
+
+```csharp
+var jsonString = JsonSerializer.Serialize(myObject);
+var maskedJson = HubbleMaskingHelper.MaskJson(jsonString);
+
+// With additional mask properties
+var maskedJson = HubbleMaskingHelper.MaskJson(
+    jsonString, 
+    new List<string> { "customField" }
+);
+```
+
+#### Características
+
+- **Automático**: Utiliza la configuración de `MaskBodyProperties`, `MaskRequestBodyProperties` y `MaskResponseBodyProperties` de Hubble.
+- **Case-Insensitive**: No distingue entre mayúsculas y minúsculas.
+- **Recursivo**: Enmascara propiedades en objetos anidados y arrays.
+- **Propiedades adicionales**: Permite agregar propiedades adicionales a enmascarar en tiempo de ejecución.
+- **Seguro**: Si Hubble no está inicializado o hay errores, devuelve el JSON sin enmascarar o un mensaje de error.
+
+#### Ejemplo con datos sensibles
+
+```csharp
+public class UserDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public string Password { get; set; }  // Sensitive
+    public string Token { get; set; }     // Sensitive
+    public string CreditCard { get; set; } // Sensitive
+}
+
+var user = new UserDto 
+{
+    Id = Guid.NewGuid(),
+    Name = "John Doe",
+    Email = "john@example.com",
+    Password = "SecretPass123",
+    Token = "abc123xyz",
+    CreditCard = "4111111111111111"
+};
+
+// Log with masking
+_logger.LogInformation("User data: {User}", 
+    HubbleMaskingHelper.SerializeMasked(user));
+
+// Output: User data: {"Id":"...","Name":"John Doe","Email":"john@example.com","Password":"*****","Token":"*****","CreditCard":"*****"}
+```
+
 ### Implementación técnica
 
 La asociación entre logs de ILogger y solicitudes HTTP funciona de la siguiente manera:
@@ -710,6 +825,121 @@ builder.Services.AddHubble(options =>
     options.Username = Environment.GetEnvironmentVariable("HUBBLE_USERNAME") ?? "admin";
     options.Password = Environment.GetEnvironmentVariable("HUBBLE_PASSWORD") ?? "default_password";
 });
+```
+
+### Masking Sensitive Data in Custom Logs
+
+Hubble provides a utility to mask sensitive data in your own logs, using the same masking configuration that applies to HTTP requests and responses.
+
+#### Using the Masking Helper
+
+```csharp
+using Gabonet.Hubble.Utilities;
+
+public class PlayerService
+{
+    private readonly ILogger<PlayerService> _logger;
+    private readonly IPlayerRepository _playerRepository;
+
+    public PlayerService(
+        ILogger<PlayerService> logger,
+        IPlayerRepository playerRepository)
+    {
+        _logger = logger;
+        _playerRepository = playerRepository;
+    }
+
+    public async Task<PlayerDto> CreatePlayerAsync(PlayerDto playerDto)
+    {
+        var player = MapToEntity(playerDto);
+        player.Id = Guid.NewGuid();
+        
+        // Use HubbleMaskingHelper to serialize and mask sensitive data
+        _logger.LogInformation("Creating player: {Player}", 
+            HubbleMaskingHelper.SerializeMasked(playerDto));
+        
+        var createdPlayer = await _playerRepository.AddAsync(player);
+        
+        // Also works with entity objects
+        _logger.LogInformation("Player created: {Player}", 
+            HubbleMaskingHelper.SerializeMasked(createdPlayer));
+        
+        return MapToDto(createdPlayer);
+    }
+}
+```
+
+#### Available Methods
+
+**`SerializeMasked<T>(T obj, List<string>? additionalMaskProperties = null, bool indent = false)`**
+
+Serializes an object to JSON and masks sensitive properties according to Hubble's configuration.
+
+```csharp
+// Basic usage
+var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject);
+
+// With additional properties to mask
+var maskedJson = HubbleMaskingHelper.SerializeMasked(
+    myObject, 
+    new List<string> { "customField", "secretData" }
+);
+
+// With indented JSON for better readability
+var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject, indent: true);
+```
+
+**`MaskJson(string jsonString, List<string>? additionalMaskProperties = null)`**
+
+Masks sensitive properties in an already serialized JSON string.
+
+```csharp
+var jsonString = JsonSerializer.Serialize(myObject);
+var maskedJson = HubbleMaskingHelper.MaskJson(jsonString);
+
+// With additional mask properties
+var maskedJson = HubbleMaskingHelper.MaskJson(
+    jsonString, 
+    new List<string> { "customField" }
+);
+```
+
+#### Features
+
+- **Automatic**: Uses Hubble's `MaskBodyProperties`, `MaskRequestBodyProperties`, and `MaskResponseBodyProperties` configuration.
+- **Case-Insensitive**: Property matching is case-insensitive.
+- **Recursive**: Masks properties in nested objects and arrays.
+- **Additional Properties**: Allows adding extra properties to mask at runtime.
+- **Safe**: If Hubble is not initialized or errors occur, returns unmasked JSON or an error message.
+
+#### Example with Sensitive Data
+
+```csharp
+public class UserDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public string Password { get; set; }  // Sensitive
+    public string Token { get; set; }     // Sensitive
+    public string CreditCard { get; set; } // Sensitive
+}
+
+var user = new UserDto 
+{
+    Id = Guid.NewGuid(),
+    Name = "John Doe",
+    Email = "john@example.com",
+    Password = "SecretPass123",
+    Token = "abc123xyz",
+    CreditCard = "4111111111111111"
+};
+
+// Log with masking
+_logger.LogInformation("User data: {User}", 
+    HubbleMaskingHelper.SerializeMasked(user));
+
+// Output: User data: {"Id":"...","Name":"John Doe","Email":"john@example.com","Password":"*****","Token":"*****","CreditCard":"*****"}
 ```
 
 ## Configuration Options
