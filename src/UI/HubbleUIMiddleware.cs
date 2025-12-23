@@ -187,6 +187,15 @@ public class HubbleUIMiddleware
     {
         try
         {
+            // Check if delete all is allowed
+            var options = context.RequestServices.GetRequiredService<HubbleOptions>();
+            if (!options.AllowDeleteAll)
+            {
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsync("Delete all operation is not allowed");
+                return;
+            }
+
             // Obtener el controlador de Hubble
             var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
             var html = await hubbleController.DeleteAllLogsAsync();
@@ -398,10 +407,24 @@ public class HubbleUIMiddleware
 
     private async Task HandleDeleteApiAsync(HttpContext context, string apiPath, HubbleController controller)
     {
+        // Check if delete all is allowed
+        var options = context.RequestServices.GetRequiredService<HubbleOptions>();
+        
         switch (apiPath)
         {
             case "/logs":
                 // DELETE /api/logs - Delete all logs
+                if (!options.AllowDeleteAll)
+                {
+                    context.Response.StatusCode = 403;
+                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+                    {
+                        Success = false,
+                        Message = "Delete all operation is not allowed"
+                    }));
+                    return;
+                }
+                
                 var deleteResponse = await controller.DeleteAllLogsApiAsync();
                 await context.Response.WriteAsync(JsonConvert.SerializeObject(deleteResponse));
                 break;

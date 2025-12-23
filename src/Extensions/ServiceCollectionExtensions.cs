@@ -150,6 +150,11 @@ public static class ServiceCollectionExtensions
         else
             hubbleConfig.HighlightDurationSeconds = 5; // Valor por defecto
 
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.AllowDeleteAll)], out bool allowDeleteAll))
+            hubbleConfig.AllowDeleteAll = allowDeleteAll;
+        else
+            hubbleConfig.AllowDeleteAll = true; // Valor por defecto
+
         // Cargar IgnorePaths como array
         var ignorePathsSection = section.GetSection(nameof(HubbleAuthConfiguration.IgnorePaths));
         var ignorePaths = new List<string>();
@@ -216,6 +221,7 @@ public static class ServiceCollectionExtensions
             DataPruneIntervalHours = hubbleConfig.DataPruneIntervalHours,
             MaxLogAgeHours = hubbleConfig.MaxLogAgeHours,
             TimeZoneId = hubbleConfig.TimeZoneId,
+            AllowDeleteAll = hubbleConfig.AllowDeleteAll,
             Security = new Gabonet.Hubble.Middleware.SecurityConfiguration
             {
                 MaskBodyProperties = hubbleConfig.Security.MaskBodyProperties,
@@ -308,6 +314,7 @@ public static class ServiceCollectionExtensions
             DataPruneIntervalHours = config.DataPruneIntervalHours,
             MaxLogAgeHours = config.MaxLogAgeHours,
             TimeZoneId = config.TimeZoneId,
+            AllowDeleteAll = config.AllowDeleteAll,
             Security = config.Security
         };
 
@@ -499,4 +506,9 @@ public class HubbleConfiguration
     /// Configuración de seguridad para enmascaramiento de datos sensibles
     /// </summary>
     public Gabonet.Hubble.Middleware.SecurityConfiguration Security { get; set; } = new Gabonet.Hubble.Middleware.SecurityConfiguration();
+
+    /// <summary>
+    /// Indica si se permite eliminar todos los logs desde la interfaz de usuario.
+    /// </summary>
+    public bool AllowDeleteAll { get; set; } = true;
 }
