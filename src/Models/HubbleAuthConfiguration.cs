@@ -99,6 +99,11 @@ public class HubbleAuthConfiguration
     /// Configuración de seguridad para enmascaramiento de datos sensibles
     /// </summary>
     public SecurityConfiguration Security { get; set; } = new SecurityConfiguration();
+
+    /// <summary>
+    /// Indica si se permite eliminar todos los logs desde la interfaz de usuario.
+    /// </summary>
+    public bool AllowDeleteAll { get; set; } = true;
 }
 
 /// <summary>

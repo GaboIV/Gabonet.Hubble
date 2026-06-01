@@ -6,6 +6,7 @@ using Gabonet.Hubble.Middleware;
 using Gabonet.Hubble.Models;
 using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI;
+using Gabonet.Hubble.Utilities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -55,7 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<HubbleController>();
 
         // Registrar las opciones
-        services.AddSingleton(new HubbleOptions
+        var options = new HubbleOptions
         {
             ServiceName = serviceName,
             // Activar por defecto la captura de logs
@@ -66,7 +67,12 @@ public static class ServiceCollectionExtensions
             HighlightDurationSeconds = 5,
             IgnorePaths = new List<string>(),
             TimeZoneId = timeZoneId ?? string.Empty
-        });
+        };
+        
+        services.AddSingleton(options);
+        
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
 
         return services;
     }
@@ -150,6 +156,11 @@ public static class ServiceCollectionExtensions
         else
             hubbleConfig.HighlightDurationSeconds = 5; // Valor por defecto
 
+        if (bool.TryParse(section[nameof(HubbleAuthConfiguration.AllowDeleteAll)], out bool allowDeleteAll))
+            hubbleConfig.AllowDeleteAll = allowDeleteAll;
+        else
+            hubbleConfig.AllowDeleteAll = true; // Valor por defecto
+
         // Cargar IgnorePaths como array
         var ignorePathsSection = section.GetSection(nameof(HubbleAuthConfiguration.IgnorePaths));
         var ignorePaths = new List<string>();
@@ -216,6 +227,7 @@ public static class ServiceCollectionExtensions
             DataPruneIntervalHours = hubbleConfig.DataPruneIntervalHours,
             MaxLogAgeHours = hubbleConfig.MaxLogAgeHours,
             TimeZoneId = hubbleConfig.TimeZoneId,
+            AllowDeleteAll = hubbleConfig.AllowDeleteAll,
             Security = new Gabonet.Hubble.Middleware.SecurityConfiguration
             {
                 MaskBodyProperties = hubbleConfig.Security.MaskBodyProperties,
@@ -225,6 +237,9 @@ public static class ServiceCollectionExtensions
         };
 
         services.AddSingleton(options);
+
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
 
         // Registrar el servicio de Hubble
         services.AddScoped<IHubbleService>(provider =>
@@ -308,10 +323,14 @@ public static class ServiceCollectionExtensions
             DataPruneIntervalHours = config.DataPruneIntervalHours,
             MaxLogAgeHours = config.MaxLogAgeHours,
             TimeZoneId = config.TimeZoneId,
+            AllowDeleteAll = config.AllowDeleteAll,
             Security = config.Security
         };
 
         services.AddSingleton(options);
+
+        // Initialize the masking helper with the options
+        HubbleMaskingHelper.Initialize(options);
 
         // Registrar el servicio de Hubble
         services.AddScoped<IHubbleService>(provider =>
@@ -499,4 +518,9 @@ public class HubbleConfiguration
     /// Configuración de seguridad para enmascaramiento de datos sensibles
     /// </summary>
     public Gabonet.Hubble.Middleware.SecurityConfiguration Security { get; set; } = new Gabonet.Hubble.Middleware.SecurityConfiguration();
+
+    /// <summary>
+    /// Indica si se permite eliminar todos los logs desde la interfaz de usuario.
+    /// </summary>
+    public bool AllowDeleteAll { get; set; } = true;
 }

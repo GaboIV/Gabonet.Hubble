@@ -29,7 +29,7 @@ public class HubbleController
     /// <param name="options">Opciones de configuración de Hubble</param>
     /// <param name="statsService">Servicio de estadísticas</param>
     public HubbleController(
-        IHubbleService hubbleService, 
+        IHubbleService hubbleService,
         Middleware.HubbleOptions options,
         IHubbleStatsService? statsService = null)
     {
@@ -209,7 +209,13 @@ public class HubbleController
 
         html += "<button type='submit' class='btn primary'>Filtrar</button>";
         html += "</form>";
-        html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_prefixPath}{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
+
+        // Show delete all button only if allowed
+        if (_options.AllowDeleteAll)
+        {
+            html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_prefixPath}{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
+        }
+
         html += "</div>";
 
         // Tabla de logs
@@ -286,13 +292,13 @@ public class HubbleController
                 // Mostrar URL y QueryParams en una sola línea
                 html += "<td class='url-cell'>";
                 html += $"<div class='url-path'>{log.HttpUrl}</div>";
-                
+
                 // Mostrar QueryParams si no están vacíos
                 if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
                 {
                     html += $"<div class='url-params'>{log.QueryParams}</div>";
                 }
-                
+
                 html += "</td>";
             }
 
@@ -604,20 +610,20 @@ public class HubbleController
         html += $"<div class='info-item'><span>Estado:</span> <span class='{(log.IsError || log.StatusCode >= 400 ? "error-text" : "success-text")}'>{log.StatusCode}</span></div>";
         html += $"<div class='info-item'><span>Duración:</span> {log.ExecutionTime} ms</div>";
         html += "</div>";
-        
+
         // URL con QueryParams en una línea completa
         html += "<div class='url-item'>";
         html += "<div class='url-label'>URL:</div>";
         html += $"<div class='url-value'>{log.HttpUrl}</div>";
-        
+
         // Mostrar QueryParams si no están vacíos
         if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
         {
             html += $"<div class='url-params-line'>{log.QueryParams}</div>";
         }
-        
+
         html += "</div>";
-        
+
         html += "</div></div>";
         html += "</div>";
 
@@ -1746,10 +1752,10 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         HubbleStatistics stats = null;
         HubbleSystemConfiguration config = null;
-        
+
         try
         {
             stats = await _statsService.GetStatisticsAsync();
@@ -1759,36 +1765,36 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", $"No se pudo obtener las estadísticas o configuración: {ex.Message}");
         }
-        
+
         if (stats == null || config == null)
         {
             return GenerateErrorPage("Error", "No se pudieron cargar las estadísticas o la configuración");
         }
-        
+
         // Generar HTML (el resto del método queda igual)
         var html = GenerateHtmlHeader("Hubble - Configuración", true);
-        
+
         html += "<div class='container'>";
         html += "<div class='header'>";
         html += "<div class='header-left'>";
         html += GetHubbleLogo();
         html += "<p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>" + _version + "</span></p>";
         html += "</div>";
-        
+
         // Botones de navegación
         html += "<div class='header-right'>";
         html += $"<a href='{_prefixPath}{_basePath}' class='btn secondary'>Volver a logs</a>";
         html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
         html += "</div>";
         html += "</div>";
-        
+
         // Contenido principal con dos columnas: estadísticas y configuración
         html += "<div class='config-container'>";
-        
+
         // Primera columna: Estadísticas
         html += "<div class='config-column stats-column'>";
         html += "<h2>Estadísticas</h2>";
-        
+
         html += "<div class='stats-card'>";
         html += "<h3>Resumen de logs</h3>";
         html += "<div class='stats-grid'>";
@@ -1798,24 +1804,24 @@ public class HubbleController
         html += $"<div class='stat-item'><span class='stat-value'>{stats.LoggerLogs}</span><span class='stat-label'>Logs de ILogger</span></div>";
         html += "</div>";
         html += "</div>";
-        
+
         // Información sobre el último prune
         html += "<div class='stats-card'>";
         html += "<h3>Limpieza de datos</h3>";
-        
+
         if (stats.LastPrune.LastPruneDate.HasValue)
         {
             var lastPruneDate = stats.LastPrune.LastPruneDate.Value.ToLocalTime();
             var timeAgo = DateTime.Now - lastPruneDate;
             var timeAgoText = FormatTimeAgo(timeAgo);
-            
+
             html += "<div class='stats-grid'>";
             html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:dd/MM/yyyy}</span><span class='stat-label'>Fecha</span></div>";
             html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:HH:mm:ss}</span><span class='stat-label'>Hora</span></div>";
             html += $"<div class='stat-item'><span class='stat-value'>{stats.LastPrune.LogsDeleted}</span><span class='stat-label'>Logs eliminados</span></div>";
             html += $"<div class='stat-item time-ago'><span class='time-ago-text'>Última limpieza: {timeAgoText}</span></div>";
             html += "</div>";
-            
+
             // Reemplazar botón con mensaje informativo
             html += "<div class='info-message' style='margin-top: 15px;'>";
             html += "<p>La limpieza automática está habilitada con un intervalo de " + config.DataPruneIntervalHours + " horas.</p>";
@@ -1824,7 +1830,7 @@ public class HubbleController
         else
         {
             html += "<p>No se ha realizado ninguna limpieza automática de datos.</p>";
-            
+
             if (config.EnableDataPrune)
             {
                 html += "<div class='info-message'>";
@@ -1839,18 +1845,18 @@ public class HubbleController
             }
         }
         html += "</div>";
-        
+
         // Información de estadística sin botón de recalcular
         html += "<div class='info-message stats-info'>";
         html += "<p>Las estadísticas se actualizan automáticamente cada vez que se accede a esta página.</p>";
         html += "</div>";
-        
+
         html += "</div>"; // Fin de la primera columna
-        
+
         // Segunda columna: Configuración del sistema
         html += "<div class='config-column config-settings-column'>";
         html += "<h2>Configuración del sistema</h2>";
-        
+
         // Información del sistema
         html += "<div class='stats-card'>";
         html += "<h3>Información del sistema</h3>";
@@ -1897,16 +1903,16 @@ public class HubbleController
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Inicio del servicio:</label>";
-        
+
         var startTime = config.SystemInfo.StartTime.ToLocalTime();
         var uptime = DateTime.Now - startTime;
         var uptimeText = FormatTimeAgo(uptime);
-        
+
         html += $"<div class='config-value'>{startTime:dd/MM/yyyy HH:mm:ss} <span class='uptime'>({uptimeText})</span></div>";
         html += "</div>";
         html += "</div>";
         html += "</div>";
-        
+
         // Configuración de limpieza
         html += "<div class='stats-card'>";
         html += "<h3>Configuración de limpieza</h3>";
@@ -1928,20 +1934,20 @@ public class HubbleController
         html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
         html += "</div>";
         html += "</div>";
-        
+
         // Configuración de captura de datos
         html += "<div class='stats-card'>";
         html += "<h3>Configuración de captura</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group'>";
         html += "<label>Capturar solicitudes HTTP (HUBBLE_ENABLE_DIAGNOSTICS):</label>";
-        
+
         // Obtener el valor directamente de la variable de entorno
         var enableDiagnostics = Environment.GetEnvironmentVariable("HUBBLE_ENABLE_DIAGNOSTICS");
-        var isEnabledStr = !string.IsNullOrEmpty(enableDiagnostics) && 
-                          (enableDiagnostics.ToLower() == "true" || enableDiagnostics == "1") 
+        var isEnabledStr = !string.IsNullOrEmpty(enableDiagnostics) &&
+                          (enableDiagnostics.ToLower() == "true" || enableDiagnostics == "1")
                           ? "Activado" : "Desactivado";
-        
+
         html += $"<div class='config-value'>{isEnabledStr}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
@@ -1957,19 +1963,19 @@ public class HubbleController
         html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
         html += "</div>";
         html += "</div>";
-        
+
         // Rutas ignoradas
         html += "<div class='stats-card'>";
         html += "<h3>Rutas ignoradas</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group ignored-paths'>";
-        
+
         // Obtener las rutas ignoradas desde el servicio o mostrar el placeholder
         var hubbleIgnorePaths = Environment.GetEnvironmentVariable("HUBBLE_IGNORE_PATHS");
         if (!string.IsNullOrEmpty(hubbleIgnorePaths))
         {
             var ignorePaths = hubbleIgnorePaths.Split(',').Select(p => p.Trim()).ToList();
-            
+
             if (ignorePaths.Count > 0)
             {
                 html += "<div class='config-value'>HUBBLE_IGNORE_PATHS:</div>";
@@ -1989,19 +1995,19 @@ public class HubbleController
         {
             html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS no definido).</div>";
         }
-        
+
         html += "</div>";
         html += "</div>";
         html += "<div class='info-message'>";
         html += "<p>La configuración no puede ser modificada. Consulte al administrador del sistema para realizar cambios.</p>";
         html += "</div>";
         html += "</div>";
-        
+
         html += "</div>"; // Fin de la segunda columna
         html += "</div>"; // Fin del contenedor de configuración
-        
+
         html += "</div>"; // Fin del contenedor principal
-        
+
         // Agregar estilos CSS específicos para la página de configuración
         html += "<style>";
         html += ".config-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }";
@@ -2046,12 +2052,12 @@ public class HubbleController
         html += ".time-ago-text { color: rgba(255, 255, 255, 0.7); font-style: italic; grid-column: span 2; }";
         html += ".time-ago { grid-column: span 2; margin-top: 5px; }";
         html += "</style>";
-        
+
         html += GenerateHtmlFooter();
-        
+
         return html;
     }
-    
+
     /// <summary>
     /// Ejecuta una limpieza manual de datos antiguos
     /// </summary>
@@ -2062,16 +2068,16 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         try
         {
             var config = await _statsService.GetSystemConfigurationAsync();
             var maxAgeHours = config.MaxLogAgeHours > 0 ? config.MaxLogAgeHours : 24;
             var cutoffDate = DateTime.UtcNow.AddHours(-maxAgeHours);
-            
+
             var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
             await _statsService.UpdatePruneStatisticsAsync(DateTime.UtcNow, logsDeleted);
-            
+
             return $"<script>alert('Limpieza manual completada. Se eliminaron {logsDeleted} logs.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
@@ -2079,7 +2085,7 @@ public class HubbleController
             return GenerateErrorPage("Error", $"Error al ejecutar la limpieza manual: {ex.Message}");
         }
     }
-    
+
     /// <summary>
     /// Recalcula las estadísticas del sistema
     /// </summary>
@@ -2090,7 +2096,7 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         try
         {
             await _statsService.RecalculateStatisticsAsync();
@@ -2101,7 +2107,7 @@ public class HubbleController
             return GenerateErrorPage("Error", $"Error al recalcular las estadísticas: {ex.Message}");
         }
     }
-    
+
     /// <summary>
     /// Guarda la configuración de limpieza de datos
     /// </summary>
@@ -2115,17 +2121,17 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         try
         {
             var config = await _statsService.GetSystemConfigurationAsync();
-            
+
             config.EnableDataPrune = enableDataPrune;
             config.DataPruneIntervalHours = Math.Max(1, Math.Min(168, dataPruneIntervalHours)); // Entre 1 y 168 horas
             config.MaxLogAgeHours = Math.Max(1, Math.Min(8760, maxLogAgeHours)); // Entre 1 hora y 1 año
-            
+
             await _statsService.SaveSystemConfigurationAsync(config);
-            
+
             return $"<script>alert('Configuración guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
@@ -2133,7 +2139,7 @@ public class HubbleController
             return GenerateErrorPage("Error", $"Error al guardar la configuración: {ex.Message}");
         }
     }
-    
+
     /// <summary>
     /// Guarda la configuración de captura de datos
     /// </summary>
@@ -2147,17 +2153,17 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         try
         {
             var config = await _statsService.GetSystemConfigurationAsync();
-            
+
             config.CaptureHttpRequests = captureHttpRequests;
             config.CaptureLoggerMessages = captureLoggerMessages;
             config.MinimumLogLevel = minimumLogLevel;
-            
+
             await _statsService.SaveSystemConfigurationAsync(config);
-            
+
             return $"<script>alert('Configuración de captura guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
@@ -2165,7 +2171,7 @@ public class HubbleController
             return GenerateErrorPage("Error", $"Error al guardar la configuración de captura: {ex.Message}");
         }
     }
-    
+
     /// <summary>
     /// Guarda la configuración de rutas ignoradas
     /// </summary>
@@ -2177,21 +2183,21 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", "El servicio de estadísticas no está disponible");
         }
-        
+
         try
         {
             var config = await _statsService.GetSystemConfigurationAsync();
-            
+
             // Convertir el texto a una lista de rutas (eliminar líneas vacías)
             var paths = ignorePaths.Split('\n')
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Select(p => p.Trim())
                 .ToList();
-            
+
             config.IgnorePaths = paths;
-            
+
             await _statsService.SaveSystemConfigurationAsync(config);
-            
+
             return $"<script>alert('Configuración de rutas ignoradas guardada correctamente.'); window.location.href='{_prefixPath}{_basePath}/config';</script>";
         }
         catch (Exception ex)
@@ -2199,7 +2205,7 @@ public class HubbleController
             return GenerateErrorPage("Error", $"Error al guardar las rutas ignoradas: {ex.Message}");
         }
     }
-    
+
     /// <summary>
     /// Formatea un intervalo de tiempo en formato legible
     /// </summary>
@@ -2212,31 +2218,31 @@ public class HubbleController
             var years = (int)(timeSpan.TotalDays / 365);
             return years == 1 ? "hace 1 año" : $"hace {years} años";
         }
-        
+
         if (timeSpan.TotalDays > 30)
         {
             var months = (int)(timeSpan.TotalDays / 30);
             return months == 1 ? "hace 1 mes" : $"hace {months} meses";
         }
-        
+
         if (timeSpan.TotalDays >= 1)
         {
             var days = (int)timeSpan.TotalDays;
             return days == 1 ? "hace 1 día" : $"hace {days} días";
         }
-        
+
         if (timeSpan.TotalHours >= 1)
         {
             var hours = (int)timeSpan.TotalHours;
             return hours == 1 ? "hace 1 hora" : $"hace {hours} horas";
         }
-        
+
         if (timeSpan.TotalMinutes >= 1)
         {
             var minutes = (int)timeSpan.TotalMinutes;
             return minutes == 1 ? "hace 1 minuto" : $"hace {minutes} minutos";
         }
-        
+
         return "hace unos segundos";
     }
 
@@ -2328,7 +2334,7 @@ public class HubbleController
         try
         {
             var log = await _hubbleService.GetLogByIdAsync(id);
-            
+
             if (log == null)
             {
                 return new LogDetailApiResponse
@@ -2377,7 +2383,7 @@ public class HubbleController
             // Get count before deleting
             var deletedCount = await _hubbleService.GetTotalLogsCountAsync();
             await _hubbleService.DeleteAllLogsAsync();
-            
+
             return new DeleteApiResponse
             {
                 Success = true,
