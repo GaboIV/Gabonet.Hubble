@@ -1,6 +1,6 @@
 # Hubble para .NET
 
-Hubble es una biblioteca para monitoreo y logging de aplicaciones .NET que permite capturar y visualizar solicitudes HTTP, logs de ILogger y consultas a bases de datos en una interfaz web integrada.
+Hubble es una biblioteca para monitoreo y logging de aplicaciones .NET (compatible con **.NET 6.0, .NET 7.0 y .NET 8.0 o superiores**) que permite capturar y visualizar solicitudes HTTP, logs de ILogger y consultas a bases de datos en una interfaz web integrada.
 
 ## Configuración
 
