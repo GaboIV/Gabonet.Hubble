@@ -36,7 +36,7 @@ Hubble is an embedded monitoring and logging dashboard for ASP.NET Core applicat
 |---|---|
 | Host application | ASP.NET Core on .NET 6, 7, 8 or later (the package targets `net6.0`, `net7.0` and `net8.0`; .NET 9+ uses the `net8.0` build) |
 | Storage | A MongoDB server supported by `MongoDB.Driver` 3.2 |
-| Optional | Entity Framework Core for SQL capture (the package depends on EF Core 6, 7 or 8 to match your target framework) |
+| Optional | Entity Framework Core for SQL capture (the package depends on EF Core 5.0.17+ on net6.0, 7 on net7.0 and 8 on net8.0) |
 
 ## Quick start
 

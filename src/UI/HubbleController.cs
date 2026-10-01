@@ -7,11 +7,16 @@ using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI.Models;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -28,6 +33,7 @@ public class HubbleController
     private readonly IAntiforgery _antiforgery;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly HubbleStorageStatus? _storageStatus;
+    private readonly TimeZoneInfo _timeZone;
 
     /// <summary>
     /// Constructor del controlador de Hubble.
@@ -55,6 +61,27 @@ public class HubbleController
         _prefixPath = options.PrefixPath.TrimEnd('/');
         _options = options;
         _statsService = statsService;
+        _timeZone = ResolveTimeZone(options.TimeZoneId);
+    }
+
+    /// <summary>
+    /// Zona horaria configurada para mostrar las fechas (UTC si no se indica o no existe).
+    /// </summary>
+    private static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
+    {
+        if (string.IsNullOrEmpty(timeZoneId))
+        {
+            return TimeZoneInfo.Utc;
+        }
+
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (Exception)
+        {
+            return TimeZoneInfo.Utc;
+        }
     }
 
     /// <summary>
@@ -148,366 +175,392 @@ public class HubbleController
             }
         }
 
-        // Generar HTML con diseño moderno
-        var html = GenerateHtmlHeader("Hubble - Logs", true);
+        var root = $"{_prefixPath}{_basePath}";
+        var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+        var hasFilters = !string.IsNullOrEmpty(method) || !string.IsNullOrEmpty(url) || !string.IsNullOrEmpty(statusGroup) || !string.IsNullOrEmpty(logType);
 
-        html += "<div class='container'>";
-        html += "<div class='header'>";
-        html += "<div class='header-left'>";
-        html += GetHubbleLogo();
-        html += "<p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>" + _version + "</span></p>";
-        html += "</div>";
+        var html = new StringBuilder(GenerateHtmlHeader("Hubble - Logs", true));
+        html.Append(TopBar("logs"));
+        html.Append($"<main class='container' id='logs-page' data-live-default='{(_options.HighlightNewServices ? "1" : "0")}' data-live-interval='{(_options.HighlightNewServices ? 3000 : 5000)}'>");
 
-        // Botón de logout si la autenticación está habilitada
-        html += "<div class='header-right'>";
-        // if (_options.HighlightNewServices)
-        // {
-        //     html += "<div class='live-indicator'>Actualización en tiempo real <span id='reload-counter'>3</span>s</div>";
-        // }
-        html += $"<a href='{_prefixPath}{_basePath}/config' class='btn primary'>Configuración</a>";
-        html += LogoutButton();
-        html += "</div>";
-        html += "</div>";
+        // Encabezado de la página
+        html.Append("<div class='page-head'><div><h1 class='page-h1'>Registros</h1>");
+        html.Append("<p class='page-sub'>Solicitudes HTTP y mensajes de ILogger capturados por Hubble</p></div>");
+        html.Append("<div class='page-head-actions'>");
+        html.Append("<button type='button' class='btn small' id='live-toggle' aria-pressed='false' title='Actualizar la lista automáticamente (L)'><span class='live-dot'></span>En vivo</button>");
+        html.Append($"<button type='button' class='btn small ghost' id='density-toggle' title='Alternar vista compacta'>{Icon("rows")}Compacta</button>");
+        html.Append("</div></div>");
 
-        // Formulario de filtro
-        html += "<div class='filter-form'>";
-        html += "<form method='get'>";
+        html.Append(RenderListStats(logs, totalCount, pageSize, method, url, statusGroup, logType));
+        html.Append(RenderFilters(root, method, url, statusGroup, logType, pageSize, hasFilters));
 
-        // Selector de método HTTP
-        html += "<div class='select-wrapper'>";
-        html += "<select name='method' class='select-field'>";
-        html += "<option value=''>Todos los métodos</option>";
+        // Resultados
+        html.Append("<section class='panel results'>");
+        html.Append("<div class='results-head'>");
+        html.Append($"<div class='results-title' id='results-count'>Mostrando <b>{logs.Count}</b> de <b>{totalCount}</b> registros · página {page} de {totalPages}</div>");
+        html.Append("<div class='results-actions'>");
+        html.Append($"<button type='button' class='btn small ghost' id='export-csv' title='Exportar a CSV las filas visibles'>{Icon("download")}Exportar CSV</button>");
 
-        var httpMethods = new[] { "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD" };
-        foreach (var httpMethod in httpMethods)
-        {
-            var selected = method == httpMethod ? "selected" : "";
-            html += $"<option value='{httpMethod}' {selected}>{httpMethod}</option>";
-        }
-
-        html += "</select>";
-        html += "</div>";
-
-        // Selector de tipo de log
-        html += "<div class='select-wrapper'>";
-        html += "<select name='logType' class='select-field'>";
-        html += "<option value=''>Todos los tipos</option>";
-        html += "<option value='ApplicationLogger'>Logs (ILogger)</option>";
-        html += "<option value='HTTP'>HTTP</option>";
-        html += "</select>";
-        html += "</div>";
-
-        // Filtro de URL
-        html += $"<input type='text' name='url' placeholder='URL' value='{E(url)}' class='input-field'>";
-
-        // Selector de grupos de estado
-        html += "<div class='select-wrapper'>";
-        html += "<select name='statusGroup' class='select-field'>";
-        html += "<option value=''>Todos los estados</option>";
-
-        var statusGroups = new Dictionary<string, string>
-        {
-            { "200", "2xx - Éxito" },
-            { "300", "3xx - Redirección" },
-            { "400", "4xx - Error cliente" },
-            { "500", "5xx - Error servidor" }
-        };
-
-        foreach (var group in statusGroups)
-        {
-            var selected = statusGroup == group.Key ? "selected" : "";
-            html += $"<option value='{group.Key}' {selected}>{group.Value}</option>";
-        }
-
-        html += "</select>";
-        html += "</div>";
-
-        html += "<button type='submit' class='btn primary'>Filtrar</button>";
-        html += "</form>";
-
-        // Show delete all button only if allowed
+        // Mostrar el botón de eliminar todo solo si está permitido
         if (_options.AllowDeleteAll)
         {
-            html += $"<form method='post' action='{_prefixPath}{_basePath}/delete-all' style='margin: 0;' onsubmit=\"return confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.');\">";
-            html += AntiforgeryField();
-            html += "<button type='submit' class='btn danger'>Eliminar todos</button>";
-            html += "</form>";
+            html.Append($"<form method='post' action='{root}/delete-all' onsubmit=\"return confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.');\">");
+            html.Append(AntiforgeryField());
+            html.Append($"<button type='submit' class='btn small danger'>{Icon("trash")}Eliminar todos</button>");
+            html.Append("</form>");
         }
 
-        html += "</div>";
+        html.Append("</div></div>");
 
-        // Tabla de logs
-        html += "<div class='table-container'>";
-        html += "<table class='data-table'>";
-        html += "<thead><tr>";
-        html += "<th>Fecha/Hora</th>";
-        html += "<th>Tipo</th>";
-        html += "<th>Método</th>";
-        html += "<th>URL/Categoría</th>";
-        html += "<th>Estado</th>";
-        html += "<th>Duración</th>";
-        html += "<th>Acciones</th>";
-        html += "</tr></thead>";
-        html += "<tbody>";
+        html.Append("<div class='table-wrap'><table class='logs'>");
+        html.Append("<thead><tr>");
+        html.Append("<th class='sortable' data-sort='time'>Fecha<span class='sort-ind'></span></th>");
+        html.Append("<th class='c-type'>Tipo</th>");
+        html.Append("<th class='sortable h-method' data-sort='method'>Método<span class='sort-ind'></span></th>");
+        html.Append("<th class='sortable' data-sort='url'>URL / Categoría<span class='sort-ind'></span></th>");
+        html.Append("<th class='sortable' data-sort='status'>Estado<span class='sort-ind'></span></th>");
+        html.Append("<th class='sortable' data-sort='ms'>Duración<span class='sort-ind'></span></th>");
+        html.Append("<th class='ta-r'>Acciones</th>");
+        html.Append("</tr></thead>");
+        html.Append("<tbody id='logs-tbody'>");
+
+        var maxDuration = Math.Max(1, logs.Where(l => !IsLoggerEntry(l)).Select(l => l.ExecutionTime).DefaultIfEmpty(0).Max());
+        var highlightSeconds = _options.HighlightDurationSeconds > 0 ? _options.HighlightDurationSeconds : 15;
+        var index = 0;
 
         foreach (var log in logs)
         {
-            var statusClass = log.IsError || log.StatusCode >= 400 ? "error" : "success";
-            var formattedTime = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
-            var isILoggerEntry = log.ControllerName == "ApplicationLogger";
-
-            // Detectar y resaltar servicios nuevos basados en su fecha de creación
-            var highlightClass = "";
-            if (_options.HighlightNewServices)
-            {
-                try
-                {
-                    // Los logs ya vienen con la zona horaria configurada
-                    // Usamos TimeZoneInfo.Local para obtener la zona horaria local del sistema
-                    DateTime now = DateTime.Now;
-
-                    // Calcular cuántos segundos han pasado desde la creación del log
-                    var secondsSinceCreation = (now - log.Timestamp).TotalSeconds;
-
-                    // Si el log se creó hace menos de 15 segundos (o el valor configurado), resaltarlo
-                    if (Math.Abs(secondsSinceCreation) <= (_options.HighlightDurationSeconds > 0 ? _options.HighlightDurationSeconds : 15))
-                    {
-                        highlightClass = " new-service";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // En caso de error en el cálculo de tiempo, imprimimos el error pero no detenemos la generación de la página
-                    Console.WriteLine($"Error al calcular el tiempo para el resaltado: {ex.Message}");
-                }
-            }
-
-            html += $"<tr class='{statusClass}{highlightClass}'>";
-            html += $"<td>{formattedTime}</td>";
-
-            // Mostrar tipo de log
-            if (isILoggerEntry)
-            {
-                // Para logs de ILogger, mostrar el nivel de log (ActionName contiene el nivel)
-                html += $"<td><span class='log-level {E(log.ActionName.ToLower())}'>{E(log.ActionName)}</span></td>";
-            }
-            else
-            {
-                // Para logs HTTP normales
-                html += $"<td>HTTP</td>";
-            }
-
-            html += $"<td>{E(log.Method)}</td>";
-
-            // Mostrar URL para HTTP o categoría para logs
-            if (isILoggerEntry)
-            {
-                // RequestData contiene la categoría del logger
-                html += $"<td class='url-cell'>{E(log.RequestData)}</td>";
-            }
-            else
-            {
-                // Mostrar URL y QueryParams en una sola línea
-                html += "<td class='url-cell'>";
-                html += $"<div class='url-path'>{E(log.HttpUrl)}</div>";
-
-                // Mostrar QueryParams si no están vacíos
-                if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
-                {
-                    html += $"<div class='url-params'>{E(log.QueryParams)}</div>";
-                }
-
-                html += "</td>";
-            }
-
-            html += $"<td>{log.StatusCode}</td>";
-            html += $"<td>{log.ExecutionTime} ms</td>";
-
-            // Añadir la etiqueta "NUEVO" para servicios resaltados en la columna de acciones
-            if (highlightClass.Contains("new-service") && !string.IsNullOrEmpty(log.ServiceName))
-            {
-                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{Uri.EscapeDataString(log.Id ?? string.Empty)}' class='btn small'>Ver</a>♾️</td>";
-            }
-            else
-            {
-                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{Uri.EscapeDataString(log.Id ?? string.Empty)}' class='btn small'>Ver</a></td>";
-            }
-
-            html += "</tr>";
+            html.Append(RenderLogRow(log, root, index++, maxDuration, highlightSeconds));
         }
 
-        html += "</tbody></table>";
-        html += "</div>";
-
-        // Paginación
-        var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
-
-        // Mostrar información de total de elementos y paginación
-        html += "<div class='pagination-info'>";
-        html += $"<span>Mostrando {logs.Count} de {totalCount} registros</span>";
-        html += $"<span>Página {page} de {totalPages}</span>";
-        html += "</div>";
-
-        html += "<div class='pagination'>";
-
-        // Botón de primera página
-        if (page > 1)
+        if (logs.Count == 0)
         {
-            html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Primera página'><span class='pagination-icon'>«</span></a>";
+            html.Append("<tr><td colspan='7'><div class='empty'>");
+            html.Append(Icon("inbox"));
+            html.Append("<h3>No hay registros</h3>");
+            html.Append(hasFilters
+                ? $"<p>Ningún registro coincide con los filtros aplicados.</p><a class='btn small soft' href='{root}'>{Icon("x")}Limpiar filtros</a>"
+                : "<p>Cuando tu aplicación reciba solicitudes aparecerán aquí.</p>");
+            html.Append("</div></td></tr>");
+        }
+
+        html.Append($"<tr id='refine-empty' hidden><td colspan='7'><div class='empty'>{Icon("filter")}<h3>Sin coincidencias en esta página</h3><p>Prueba con otro criterio o quita el refinado.</p></div></td></tr>");
+        html.Append("</tbody></table></div>");
+
+        html.Append(RenderPager(page, totalPages, pageSize, totalCount, method, url, statusGroup, logType));
+        html.Append("</section>");
+        html.Append("</main>");
+
+        html.Append(GenerateHtmlFooter());
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Tarjetas de resumen de la lista: total que coincide con el filtro y métricas de la página actual.
+    /// </summary>
+    private string RenderListStats(List<GeneralLog> logs, long totalCount, int pageSize, string? method, string? url, string? statusGroup, string? logType)
+    {
+        var httpLogs = logs.Where(l => !IsLoggerEntry(l)).ToList();
+        var ok = httpLogs.Count(l => l.StatusCode >= 200 && l.StatusCode < 400);
+        var clientErrors = httpLogs.Count(l => l.StatusCode >= 400 && l.StatusCode < 500);
+        var serverErrors = httpLogs.Count(l => l.StatusCode >= 500);
+        var durations = httpLogs.Select(l => l.ExecutionTime).OrderBy(d => d).ToList();
+        var average = durations.Count > 0 ? (long)Math.Round(durations.Average()) : 0;
+        var p95 = durations.Count > 0 ? durations[Math.Max(0, (int)Math.Ceiling(durations.Count * 0.95) - 1)] : 0;
+        var slowest = httpLogs.OrderByDescending(l => l.ExecutionTime).FirstOrDefault();
+        int Percent(int n) => httpLogs.Count == 0 ? 0 : (int)Math.Round(100.0 * n / httpLogs.Count);
+
+        string StatusCard(string group, string icon, string color, string label, int count, string caption)
+        {
+            var active = statusGroup == group;
+            var href = PageLink(1, pageSize, method, url, active ? null : group, logType);
+            var title = active ? "Quitar el filtro de estado" : "Filtrar por este estado";
+            return $"<a class='stat{(active ? " active" : "")}' style='--c:var(--{color})' href='{href}' title='{title}'>" +
+                   $"<div class='stat-label'>{Icon(icon)}{label}</div>" +
+                   $"<div class='stat-value'>{count}<small>{Percent(count)}%</small></div>" +
+                   $"<div class='stat-sub'>{caption}</div>" +
+                   $"<div class='meter'><span style='width:{Percent(count)}%'></span></div></a>";
+        }
+
+        var html = new StringBuilder("<section class='stats' id='stats'>");
+
+        html.Append("<div class='stat' style='--c:var(--primary-2)'>");
+        html.Append($"<div class='stat-label'>{Icon("layers")}Registros</div>");
+        html.Append($"<div class='stat-value'>{totalCount}</div>");
+        html.Append($"<div class='stat-sub'>{logs.Count} en esta página · {httpLogs.Count} HTTP · {logs.Count - httpLogs.Count} ILogger</div>");
+        html.Append("</div>");
+
+        html.Append(StatusCard("200", "check-circle", "green", "Correctas", ok, "2xx / 3xx en esta página"));
+        html.Append(StatusCard("400", "alert", "amber", "Errores cliente", clientErrors, "4xx en esta página"));
+        html.Append(StatusCard("500", "x-circle", "red", "Errores servidor", serverErrors, "5xx en esta página"));
+
+        html.Append("<div class='stat' style='--c:var(--accent)'>");
+        html.Append($"<div class='stat-label'>{Icon("clock")}Duración media</div>");
+        html.Append($"<div class='stat-value'>{average}<small>ms</small></div>");
+        html.Append($"<div class='stat-sub'>p95 · {p95} ms</div>");
+        html.Append("</div>");
+
+        if (slowest != null)
+        {
+            html.Append($"<a class='stat' style='--c:var(--pink)' href='{_prefixPath}{_basePath}/detail/{Uri.EscapeDataString(slowest.Id ?? string.Empty)}' title='Ver la solicitud más lenta'>");
+            html.Append($"<div class='stat-label'>{Icon("zap")}Más lenta</div>");
+            html.Append($"<div class='stat-value'>{slowest.ExecutionTime}<small>ms</small></div>");
+            html.Append($"<div class='stat-sub mono'>{E(slowest.Method)} {E(slowest.HttpUrl)}</div>");
+            html.Append("</a>");
         }
         else
         {
-            html += $"<span class='btn pagination-btn disabled' title='Primera página'><span class='pagination-icon'>«</span></span>";
+            html.Append($"<div class='stat' style='--c:var(--pink)'><div class='stat-label'>{Icon("zap")}Más lenta</div><div class='stat-value'>—</div><div class='stat-sub'>Sin solicitudes HTTP</div></div>");
         }
 
-        // Botón página anterior
-        if (page > 1)
+        html.Append("</section>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Panel de filtros: búsqueda en servidor, filtros rápidos, refinado en cliente y búsquedas guardadas.
+    /// </summary>
+    private static string RenderFilters(string root, string? method, string? url, string? statusGroup, string? logType, int pageSize, bool hasFilters)
+    {
+        var html = new StringBuilder("<section class='panel filters'>");
+        html.Append($"<form method='get' action='{root}' id='filter-form' class='filter-form'>");
+
+        // Búsqueda por URL, tipo y tamaño de página
+        html.Append("<div class='filter-row'>");
+        html.Append($"<label class='field grow'>{Icon("search")}<input class='input' type='search' name='url' placeholder='Buscar por URL…  ej: /api/orders' value='{E(url)}' data-search-focus autocomplete='off' spellcheck='false' aria-label='Buscar por URL'><kbd>/</kbd></label>");
+
+        html.Append("<select name='logType' class='select' data-autosubmit aria-label='Tipo de registro'>");
+        foreach (var (value, label) in new[] { ("", "Todos los tipos"), ("HTTP", "Solo HTTP"), ("ApplicationLogger", "Solo ILogger") })
         {
-            html += $"<a href='{PageLink(page - 1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Página anterior'><span class='pagination-icon'>‹</span></a>";
+            html.Append($"<option value='{value}'{(logType == value || (value == "" && string.IsNullOrEmpty(logType)) ? " selected" : "")}>{label}</option>");
+        }
+        html.Append("</select>");
+
+        html.Append("<select name='pageSize' class='select' data-autosubmit aria-label='Registros por página'>");
+        foreach (var size in new[] { 25, 50, 100, 200 })
+        {
+            html.Append($"<option value='{size}'{(pageSize == size ? " selected" : "")}>{size} por página</option>");
+        }
+        if (!new[] { 25, 50, 100, 200 }.Contains(pageSize))
+        {
+            html.Append($"<option value='{pageSize}' selected>{pageSize} por página</option>");
+        }
+        html.Append("</select>");
+
+        html.Append($"<button type='submit' class='btn primary'>{Icon("search")}Buscar</button>");
+        if (hasFilters)
+        {
+            html.Append($"<a class='btn ghost' href='{root}'>{Icon("x")}Limpiar</a>");
+        }
+        html.Append("</div>");
+
+        // Filtros rápidos por método y estado
+        html.Append("<div class='filter-row'>");
+        html.Append("<span class='filter-label'>Método</span><div class='chips'>");
+        html.Append(RadioChip("method", "", "Todos", "all", string.IsNullOrEmpty(method)));
+        foreach (var httpMethod in new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD" })
+        {
+            html.Append(RadioChip("method", httpMethod, httpMethod, MethodClass(httpMethod), method == httpMethod));
+        }
+        html.Append("</div><span class='vsep'></span>");
+        html.Append("<span class='filter-label'>Estado</span><div class='chips'>");
+        html.Append(RadioChip("statusGroup", "", "Todos", "all", string.IsNullOrEmpty(statusGroup)));
+        foreach (var (group, label) in new[] { ("200", "2xx Éxito"), ("300", "3xx Redirección"), ("400", "4xx Cliente"), ("500", "5xx Servidor") })
+        {
+            html.Append(RadioChip("statusGroup", group, label, $"s-{group[0]}", statusGroup == group));
+        }
+        html.Append("</div></div>");
+        html.Append("</form>");
+
+        // Búsqueda avanzada sobre los resultados de la página actual (en el navegador)
+        html.Append("<div class='filter-row bordered'>");
+        html.Append($"<label class='field grow'>{Icon("filter")}<input class='input mono' id='refine' type='text' placeholder='Refinar esta página…  status:5xx  ms>500  -method:OPTIONS  \"texto exacto\"' autocomplete='off' spellcheck='false' aria-label='Refinar resultados'><kbd>F</kbd></label>");
+        html.Append("<span class='refine-count' id='refine-count'></span>");
+        html.Append("<div class='chips'>");
+        foreach (var (token, label, css) in new[]
+                 {
+                     ("is:error", "Con error", "s-5"),
+                     ("ms>1000", "Lentas > 1 s", "s-4"),
+                     ("type:http", "HTTP", "m-get"),
+                     ("type:log", "ILogger", "l-information"),
+                     ("is:new", "Nuevas", "m-patch")
+                 })
+        {
+            html.Append($"<button type='button' class='chip {css}' data-token='{token}'><span class='dot'></span>{label}</button>");
+        }
+        html.Append("</div>");
+        html.Append($"<button type='button' class='btn small ghost' id='syntax-toggle' title='Ver la sintaxis de búsqueda'>{Icon("info")}Sintaxis</button>");
+        html.Append($"<button type='button' class='btn small ghost icon' id='refine-clear' title='Quitar el refinado'>{Icon("x")}</button>");
+        html.Append("</div>");
+
+        html.Append("<div class='syntax-help' id='syntax-help' hidden>");
+        foreach (var (example, description) in new[]
+                 {
+                     ("status:5xx", "familia de estado (o exacto: status:404)"),
+                     ("status>=400", "comparaciones de estado"),
+                     ("method:POST", "método HTTP"),
+                     ("ms>500", "duración en ms (>, >=, <, <=)"),
+                     ("type:log", "tipo: http o log (ILogger)"),
+                     ("level:warning", "nivel del log de ILogger"),
+                     ("url:/api/orders", "la URL contiene el texto"),
+                     ("is:error", "también is:ok, is:slow, is:new"),
+                     ("-health", "excluir lo que contenga el término"),
+                     ("\"texto exacto\"", "frase literal en cualquier columna")
+                 })
+        {
+            html.Append($"<div><code>{E(example)}</code> {description}</div>");
+        }
+        html.Append("</div>");
+
+        // Búsquedas guardadas (en el navegador)
+        html.Append("<div class='filter-row bordered'>");
+        html.Append($"<span class='filter-label'>{Icon("bookmark")}Guardadas</span>");
+        html.Append("<div class='chips' id='saved-list'></div>");
+        html.Append($"<button type='button' class='btn small soft' id='save-search'>{Icon("plus")}Guardar búsqueda</button>");
+        html.Append($"<span class='save-form' id='save-form' hidden><input class='input sm' id='save-name' maxlength='80' placeholder='Nombre de la búsqueda' aria-label='Nombre de la búsqueda'><button type='button' class='btn small primary' id='save-confirm'>Guardar</button><button type='button' class='btn small ghost icon' id='save-cancel' title='Cancelar'>{Icon("x")}</button></span>");
+        html.Append("</div>");
+
+        html.Append("</section>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Chip de selección única que envía el formulario de filtros al cambiar.
+    /// </summary>
+    private static string RadioChip(string name, string value, string label, string css, bool active)
+    {
+        return $"<label class='chip {css}{(active ? " active" : "")}'><input type='radio' name='{name}' value='{E(value)}'{(active ? " checked" : "")} data-autosubmit><span class='dot'></span>{E(label)}</label>";
+    }
+
+    /// <summary>
+    /// Fila de la tabla de logs. Los atributos data-* alimentan la búsqueda avanzada, la ordenación y la exportación.
+    /// </summary>
+    private string RenderLogRow(GeneralLog log, string root, int index, long maxDuration, int highlightSeconds)
+    {
+        var isLogger = IsLoggerEntry(log);
+        var detailUrl = $"{root}/detail/{Uri.EscapeDataString(log.Id ?? string.Empty)}";
+        var age = AgeSeconds(log.Timestamp);
+        var isNew = _options.HighlightNewServices && Math.Abs(age) <= highlightSeconds;
+        var (level, _) = isLogger ? ParseLoggerAction(log.ActionName) : (string.Empty, string.Empty);
+        var isError = log.IsError || (!isLogger && log.StatusCode >= 400);
+        var rowFamily = isLogger ? (isError ? 5 : level == "Warning" ? 4 : 0) : StatusFamily(log.StatusCode);
+        var fullUrl = log.HttpUrl + (HasQuery(log.QueryParams) ? log.QueryParams : string.Empty);
+        var time = log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+        var html = new StringBuilder();
+        html.Append($"<tr class='row st-{rowFamily}{(isNew ? " new-service" : "")}' data-href='{E(detailUrl)}' data-id='{E(log.Id)}' data-idx='{index}' ");
+        html.Append($"data-ticks='{log.Timestamp.Ticks}' data-ts='{time}' data-type='{(isLogger ? "log" : "http")}' data-level='{E(level)}' ");
+        html.Append($"data-method='{E(log.Method)}' data-status='{log.StatusCode}' data-ms='{log.ExecutionTime}' data-url='{E(fullUrl)}' data-error='{(isError ? 1 : 0)}'>");
+
+        html.Append($"<td class='c-time'><div class='t-rel' title='{time}'><span data-age='{age.ToString("0", CultureInfo.InvariantCulture)}'>{FormatAgo(age)}</span>{(isNew ? "<span class='new-tag'>NUEVO</span>" : "")}</div><div class='t-abs'>{time}</div></td>");
+        html.Append($"<td class='c-type'>{(isLogger ? LevelBadge(level) : "<span class='badge plain m-other'>HTTP</span>")}</td>");
+        html.Append($"<td class='c-method'>{MethodBadge(log.Method)}</td>");
+
+        html.Append("<td class='c-url'>");
+        if (isLogger)
+        {
+            // RequestData contiene la categoría del logger y ResponseData el mensaje
+            html.Append($"<div class='u-cat' title='{E(log.RequestData)}'>{E(log.RequestData)}</div>");
+            html.Append($"<div class='u-msg' title='{E(Truncate(log.ResponseData, 600))}'>{E(Truncate(log.ResponseData, 240))}</div>");
         }
         else
         {
-            html += $"<span class='btn pagination-btn disabled' title='Página anterior'><span class='pagination-icon'>‹</span></span>";
+            html.Append($"<div class='u-path' title='{E(log.HttpUrl)}'>{E(log.HttpUrl)}</div>");
+            if (HasQuery(log.QueryParams))
+            {
+                html.Append($"<span class='u-q' title='{E(log.QueryParams)}'>{E(log.QueryParams)}</span>");
+            }
+        }
+        html.Append("</td>");
+
+        html.Append($"<td class='c-status'>{(isLogger ? "<span class='muted'>—</span>" : StatusPill(log.StatusCode))}</td>");
+
+        if (isLogger)
+        {
+            html.Append("<td class='c-dur'><span class='muted'>—</span></td>");
+        }
+        else
+        {
+            var width = Math.Max(2, (int)Math.Round(100.0 * log.ExecutionTime / maxDuration));
+            html.Append($"<td class='c-dur'><div class='dur {DurationClass(log.ExecutionTime)}'><span class='dur-v'>{log.ExecutionTime} ms</span><span class='dur-bar'><i style='width:{width}%'></i></span></div></td>");
         }
 
-        // Información de página con navegador de páginas
-        html += "<div class='page-navigator'>";
+        html.Append("<td class='c-act'><div class='row-actions'>");
+        html.Append(CopyButton(fullUrl, "Copiar URL", "ghost reveal"));
+        html.Append($"<a class='btn icon small ghost reveal' href='{E(detailUrl)}' target='_blank' rel='noopener' title='Abrir en una pestaña nueva'>{Icon("external")}</a>");
+        html.Append($"<a class='btn small soft' href='{E(detailUrl)}'>Ver{Icon("chevron-right")}</a>");
+        html.Append("</div></td></tr>");
 
-        // Lógica mejorada para mostrar las páginas
-        int pagesToShow = 5;
-        int halfPagesToShow = pagesToShow / 2;
+        return html.ToString();
+    }
 
-        int startPage = Math.Max(1, page - halfPagesToShow);
-        int endPage = Math.Min(totalPages, startPage + pagesToShow - 1);
+    /// <summary>
+    /// Paginación con accesos a primera/última página y salto directo.
+    /// </summary>
+    private static string RenderPager(int page, int totalPages, int pageSize, long totalCount, string? method, string? url, string? statusGroup, string? logType)
+    {
+        string Link(int target, string content, string title, string extra = "") =>
+            $"<a href='{PageLink(target, pageSize, method, url, statusGroup, logType)}' class='page-btn' title='{title}'{extra}>{content}</a>";
+        string Disabled(string content, string title) => $"<span class='page-btn disabled' title='{title}'>{content}</span>";
 
-        // Ajustar startPage si estamos cerca del final
+        var html = new StringBuilder("<div class='pager' id='pager'>");
+        html.Append($"<div class='pager-info'>Página <b>{page}</b> de <b>{totalPages}</b> · {totalCount} registros en total</div>");
+        html.Append("<div class='pager-nav'>");
+
+        html.Append(page > 1 ? Link(1, Icon("chevrons-left"), "Primera página") : Disabled(Icon("chevrons-left"), "Primera página"));
+        html.Append(page > 1 ? Link(page - 1, Icon("chevron-left"), "Página anterior (←)", " data-page-prev") : Disabled(Icon("chevron-left"), "Página anterior"));
+
+        const int pagesToShow = 5;
+        var startPage = Math.Max(1, page - pagesToShow / 2);
+        var endPage = Math.Min(totalPages, startPage + pagesToShow - 1);
         if (endPage == totalPages)
         {
             startPage = Math.Max(1, endPage - pagesToShow + 1);
         }
 
-        // Mostrar elipsis al inicio si es necesario
         if (startPage > 1)
         {
+            html.Append(Link(1, "1", "Página 1"));
             if (startPage > 2)
             {
-                html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='page-number'>1</a>";
-                html += "<span class='page-ellipsis'>...</span>";
-            }
-            else if (startPage == 2)
-            {
-                html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='page-number'>1</a>";
+                html.Append("<span class='page-ellipsis'>…</span>");
             }
         }
 
-        // Mostrar páginas numeradas
-        for (int i = startPage; i <= endPage; i++)
+        for (var i = startPage; i <= endPage; i++)
         {
-            if (i == page)
-            {
-                html += $"<span class='page-number current'>{i}</span>";
-            }
-            else
-            {
-                html += $"<a href='{PageLink(i, pageSize, method, url, statusGroup, logType)}' class='page-number'>{i}</a>";
-            }
+            html.Append(i == page ? $"<span class='page-btn current'>{i}</span>" : Link(i, i.ToString(CultureInfo.InvariantCulture), $"Página {i}"));
         }
 
-        // Mostrar elipsis al final si es necesario
         if (endPage < totalPages)
         {
             if (endPage < totalPages - 1)
             {
-                html += "<span class='page-ellipsis'>...</span>";
-                html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='page-number'>{totalPages}</a>";
+                html.Append("<span class='page-ellipsis'>…</span>");
             }
-            else if (endPage == totalPages - 1)
+            html.Append(Link(totalPages, totalPages.ToString(CultureInfo.InvariantCulture), $"Página {totalPages}"));
+        }
+
+        html.Append(page < totalPages ? Link(page + 1, Icon("chevron-right"), "Página siguiente (→)", " data-page-next") : Disabled(Icon("chevron-right"), "Página siguiente"));
+        html.Append(page < totalPages ? Link(totalPages, Icon("chevrons-right"), "Última página") : Disabled(Icon("chevrons-right"), "Última página"));
+
+        if (totalPages > 1)
+        {
+            html.Append("<form method='get' class='page-jump'>");
+            foreach (var (name, value) in new[] { ("method", method), ("url", url), ("statusGroup", statusGroup), ("logType", logType) })
             {
-                html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='page-number'>{totalPages}</a>";
-            }
-        }
-
-        html += "</div>";
-
-        // Botón página siguiente
-        if (page < totalPages)
-        {
-            html += $"<a href='{PageLink(page + 1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Página siguiente'><span class='pagination-icon'>›</span></a>";
-        }
-        else
-        {
-            html += $"<span class='btn pagination-btn disabled' title='Página siguiente'><span class='pagination-icon'>›</span></span>";
-        }
-
-        // Botón de última página
-        if (page < totalPages)
-        {
-            html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Última página'><span class='pagination-icon'>»</span></a>";
-        }
-        else
-        {
-            html += $"<span class='btn pagination-btn disabled' title='Última página'><span class='pagination-icon'>»</span></span>";
-        }
-
-        html += "</div>";
-        html += "</div>"; // Cierre del container
-
-        html += GenerateHtmlFooter();
-
-        // Agregar script para recarga automática si está habilitada la opción de resaltar servicios en tiempo real
-        if (_options.HighlightNewServices)
-        {
-            html += @"
-<script>
-    // Función para recargar la página preservando los filtros actuales
-    function reloadPageWithFilters() {
-        // Obtener la URL actual con todos sus parámetros
-        var currentUrl = window.location.href;
-        // Recargar preservando la posición de scroll
-        var scrollPosition = window.scrollY;
-        
-        // Usar fetch para cargar la página en segundo plano sin perder el estado
-        fetch(currentUrl)
-            .then(response => response.text())
-            .then(html => {
-                // Extraer solo el contenido de la tabla
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                const newTable = doc.querySelector('.table-container');
-                
-                if (newTable) {
-                    // Reemplazar solo la tabla, manteniendo el resto de la página
-                    document.querySelector('.table-container').innerHTML = newTable.innerHTML;
-                    
-                    // Restaurar la posición de scroll
-                    window.scrollTo(0, scrollPosition);
+                if (!string.IsNullOrEmpty(value))
+                {
+                    html.Append($"<input type='hidden' name='{name}' value='{E(value)}'>");
                 }
-            })
-            .catch(error => {
-                console.error('Error al recargar la tabla:', error);
-            });
-    }
-    
-    // Configurar recarga automática cada 3 segundos para actualizar la tabla de servicios
-    setInterval(reloadPageWithFilters, 3000);
-    
-    // Actualizar el contador de recarga
-    setInterval(function() {
-        var counter = document.getElementById('reload-counter');
-        if (counter) {
-            var count = parseInt(counter.textContent);
-            if (count > 1) {
-                counter.textContent = count - 1;
-            } else {
-                counter.textContent = 3;
             }
-        }
-    }, 1000);
-</script>";
+            html.Append($"<input type='hidden' name='pageSize' value='{pageSize}'>");
+            html.Append($"<span>Ir a</span><input class='input sm' type='number' name='page' min='1' max='{totalPages}' value='{page}' aria-label='Ir a la página'>");
+            html.Append("</form>");
         }
 
-        html += "</body></html>";
-        return html;
+        html.Append("</div></div>");
+        return html.ToString();
     }
 
     /// <summary>
@@ -523,279 +576,615 @@ public class HubbleController
         {
             return GenerateErrorPage("Log no encontrado", "El log solicitado no existe o ha sido eliminado.");
         }
-        var html = GenerateHtmlHeader("Hubble - Detalle del Log", true);
 
-        html += "<div class='container'>";
-        html += "<div class='header'>";
-        html += "<div class='header-left'>";
-        html += GetHubbleLogo();
-        html += "<div class='action-buttons'>";
-        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
-        html += "</div>";
-        html += "</div>";
-
-        // Botón de logout si la autenticación está habilitada
-        html += "<div class='header-right'>";
-        html += LogoutButton();
-        html += "</div>";
-        html += "</div>";
-
-        html += "<h2 class='page-title'>Detalle del Log</h2>";
-
-        // Estilos para acordeón
-        html += @"
-        <style>
-            .card {
-                margin-bottom: 15px;
-                border-radius: 8px;
-                overflow: hidden;
-            }
-            .card-header {
-                background-color: var(--surface);
-                padding: 15px;
-                cursor: pointer;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                transition: background-color 0.3s;
-            }
-            .card-header:hover {
-                background-color: #2a2a2a;
-            }
-            .card-header h2 {
-                margin: 0;
-                font-size: 1.2rem;
-            }
-            .card-header::after {
-                content: '▼';
-                font-size: 12px;
-                transition: transform 0.3s;
-            }
-            .card-header.collapsed::after {
-                transform: rotate(-90deg);
-            }
-            .card-content {
-                background-color: var(--surface);
-                overflow: hidden;
-            }
-            .card-header.collapsed + .card-content {
-                display: none;
-            }
-            .card-content-inner {
-                padding: 15px;
-            }
-            .error-card .card-header {
-                background-color: rgba(207, 102, 121, 0.2);
-            }
-            .error-card .card-content {
-                background-color: rgba(207, 102, 121, 0.1);
-            }
-        </style>";
-
-        // Script para funcionalidad de acordeón
-        html += @"
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                // Funcionalidad de acordeón para las tarjetas
-                const cardHeaders = document.querySelectorAll('.card-header');
-                cardHeaders.forEach(header => {
-                    header.addEventListener('click', function() {
-                        this.classList.toggle('collapsed');
-                    });
-                });
-                
-                // Expandir la primera tarjeta por defecto
-                if (cardHeaders.length > 0) {
-                    cardHeaders[0].classList.remove('collapsed');
-                }
-
-                // Colapsar el resto de tarjetas
-                for (let i = 1; i < cardHeaders.length; i++) {
-                    cardHeaders[i].classList.add('collapsed');
-                }
-            });
-        </script>";
-
-        // Información general
-        html += "<div class='card'>";
-        html += "<div class='card-header'><h2>Información General</h2></div>";
-        html += "<div class='card-content'><div class='card-content-inner'>";
-        html += "<div class='info-grid'>";
-        html += $"<div class='info-item'><span>Fecha/Hora:</span> {log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")}</div>";
-        html += $"<div class='info-item'><span>Método:</span> {E(log.Method)}</div>";
-        html += $"<div class='info-item'><span>Controlador:</span> {E(log.ControllerName)}</div>";
-        html += $"<div class='info-item'><span>Acción:</span> {E(log.ActionName)}</div>";
-        html += $"<div class='info-item'><span>Estado:</span> <span class='{(log.IsError || log.StatusCode >= 400 ? "error-text" : "success-text")}'>{log.StatusCode}</span></div>";
-        html += $"<div class='info-item'><span>Duración:</span> {log.ExecutionTime} ms</div>";
-        html += "</div>";
-
-        // URL con QueryParams en una línea completa
-        html += "<div class='url-item'>";
-        html += "<div class='url-label'>URL:</div>";
-        html += $"<div class='url-value'>{E(log.HttpUrl)}</div>";
-
-        // Mostrar QueryParams si no están vacíos
-        if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
-        {
-            html += $"<div class='url-params-line'>{E(log.QueryParams)}</div>";
-        }
-
-        html += "</div>";
-
-        html += "</div></div>";
-        html += "</div>";
-
-        // Si hay error
-        if (log.IsError || !string.IsNullOrEmpty(log.ErrorMessage))
-        {
-            html += "<div class='card error-card'>";
-            html += "<div class='card-header collapsed'><h2>Error</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{E(log.ErrorMessage)}</div>";
-
-            if (!string.IsNullOrEmpty(log.StackTrace))
-            {
-                html += "<h3>Stack Trace</h3>";
-                html += $"<div class='code-block'>{E(log.StackTrace)}</div>";
-            }
-
-            html += "</div></div>";
-            html += "</div>";
-        }
-
-        // Cabeceras de la solicitud
-        if (!string.IsNullOrEmpty(log.RequestHeaders))
-        {
-            html += "<div class='card'>";
-            html += "<div class='card-header collapsed'><h2>Cabeceras de la Solicitud</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{E(FormatJson(log.RequestHeaders))}</div>";
-            html += "</div></div>";
-            html += "</div>";
-        }
-
-        // Datos de la solicitud
-        if (!string.IsNullOrEmpty(log.RequestData))
-        {
-            html += "<div class='card'>";
-            html += "<div class='card-header collapsed'><h2>Datos de la Solicitud</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{E(FormatJson(log.RequestData))}</div>";
-            html += "</div></div>";
-            html += "</div>";
-        }
-
-        // Datos de la respuesta
-        if (!string.IsNullOrEmpty(log.ResponseData))
-        {
-            html += "<div class='card'>";
-            html += "<div class='card-header collapsed'><h2>Datos de la Respuesta</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{E(FormatJson(log.ResponseData))}</div>";
-            html += "</div></div>";
-            html += "</div>";
-        }
-
-        // Consultas a bases de datos
-        if (log.DatabaseQueries.Count > 0)
-        {
-            html += "<div class='card'>";
-            html += "<div class='card-header collapsed'><h2>Consultas a Bases de Datos</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
-
-            foreach (var query in log.DatabaseQueries)
-            {
-                html += "<div class='query-item'>";
-                html += $"<div class='query-header'>";
-                html += $"<span class='query-type'>{E(query.OperationType ?? "QUERY")}</span>";
-                html += $"<span class='query-db'>{E(query.DatabaseType)} - {E(query.DatabaseName)}</span>";
-                html += $"<span class='query-time'>{query.ExecutionTime} ms</span>";
-                html += "</div>";
-
-                html += $"<div class='code-block sql'>{E(query.Query)}</div>";
-
-                if (!string.IsNullOrEmpty(query.Parameters))
-                {
-                    html += "<h4>Parámetros</h4>";
-                    html += $"<div class='code-block'>{E(FormatJson(query.Parameters))}</div>";
-                }
-
-                if (!string.IsNullOrEmpty(query.TableName))
-                {
-                    html += $"<div class='query-meta'>Tabla: {E(query.TableName)}</div>";
-                }
-
-                if (!string.IsNullOrEmpty(query.CallerMethod))
-                {
-                    html += $"<div class='query-meta'>Método: {E(query.CallerMethod)}</div>";
-                }
-
-                html += "</div>";
-            }
-
-            html += "</div></div>";
-            html += "</div>";
-        }
+        var isLogger = IsLoggerEntry(log);
 
         // Logs relacionados (logs de ILogger asociados a esta solicitud)
-        var relatedLogs = await _hubbleService.GetRelatedLogsAsync(log.Id ?? string.Empty);
-        if (relatedLogs.Count > 0)
+        var relatedLogs = isLogger
+            ? new List<GeneralLog>()
+            : await _hubbleService.GetRelatedLogsAsync(log.Id ?? string.Empty);
+
+        var root = $"{_prefixPath}{_basePath}";
+        var timestamp = ToDisplayTime(log.Timestamp);
+        var age = AgeSeconds(log.Timestamp);
+        var hasQuery = HasQuery(log.QueryParams);
+        var fullUrl = log.HttpUrl + (hasQuery ? log.QueryParams : string.Empty);
+        var hasError = log.IsError || !string.IsNullOrEmpty(log.ErrorMessage) || !string.IsNullOrEmpty(log.StackTrace);
+        var family = StatusFamily(log.StatusCode);
+        var (level, source) = isLogger ? ParseLoggerAction(log.ActionName) : (string.Empty, string.Empty);
+        var headers = ParseHeaders(log.RequestHeaders);
+        var apiUrl = $"{root}/api/logs/{Uri.EscapeDataString(log.Id ?? string.Empty)}";
+
+        var html = new StringBuilder(GenerateHtmlHeader(isLogger ? "Hubble - Log de aplicación" : $"Hubble - {log.Method} {log.HttpUrl}", true));
+        html.Append(TopBar("logs"));
+        html.Append($"<main class='container' id='detail-page' data-id='{E(log.Id)}'>");
+
+        html.Append($"<nav class='crumbs'><a href='{root}' data-back title='Volver a la lista (B)'>{Icon("arrow-left")}Registros</a><span>/</span><span>{(isLogger ? "Log de aplicación" : "Solicitud HTTP")}</span><span class='id'>#{E(log.Id)}</span></nav>");
+
+        // Cabecera con lo esencial del log
+        var heroClass = hasError || family == 5 ? " is-error" : family == 4 || level == "Warning" ? " is-warn" : string.Empty;
+        html.Append($"<section class='hero{heroClass}'>");
+        html.Append("<div class='hero-top'><div class='hero-badges'>");
+        if (isLogger)
         {
-            html += "<div class='card'>";
-            html += "<div class='card-header collapsed'><h2>Loggers</h2></div>";
-            html += "<div class='card-content'><div class='card-content-inner'>";
+            html.Append(LevelBadge(level));
+            html.Append("<span class='badge pill plain m-other'>ILogger</span>");
+        }
+        else
+        {
+            html.Append(MethodBadge(log.Method, true));
+            html.Append(StatusPill(log.StatusCode, true));
+            html.Append($"<span class='badge pill lg {DurationColor(log.ExecutionTime)}'>{Icon("clock")}{log.ExecutionTime} ms</span>");
+        }
+        if (hasError)
+        {
+            html.Append($"<span class='badge pill lg plain s-5'>{Icon("alert")}Error</span>");
+        }
+        html.Append($"<span class='badge pill lg plain s-0' title='{timestamp:yyyy-MM-dd HH:mm:ss}'>{Icon("calendar")}<span data-age='{age.ToString("0", CultureInfo.InvariantCulture)}'>{FormatAgo(age)}</span></span>");
+        html.Append("</div>");
 
-            // Agrupar logs por categoría (RequestData contiene el nombre de la categoría)
-            var logsByCategory = relatedLogs
-                .GroupBy(l => l.RequestData)
-                .OrderBy(g => g.Key)
-                .ToList();
+        html.Append("<div class='hero-actions'>");
+        if (!isLogger)
+        {
+            html.Append($"<button type='button' class='btn small' data-copy='{E(fullUrl)}' title='Copiar la URL con sus parámetros'>{Icon("copy")}{Icon("check")}Copiar URL</button>");
+            html.Append($"<button type='button' class='btn small' data-copy-target='#curl-src' title='Copiar la solicitud como comando cURL'>{Icon("terminal")}{Icon("check")}cURL</button>");
+        }
+        else
+        {
+            html.Append($"<button type='button' class='btn small' data-copy='{E(log.ResponseData)}'>{Icon("copy")}{Icon("check")}Copiar mensaje</button>");
+        }
+        html.Append($"<button type='button' class='btn small' id='download-json' data-api='{E(apiUrl)}' title='Descargar el log completo en JSON'>{Icon("download")}JSON</button>");
+        html.Append($"<a class='btn small ghost' href='{E(apiUrl)}' target='_blank' rel='noopener' title='Abrir el log en la API de Hubble'>{Icon("code")}API</a>");
+        html.Append("</div></div>");
 
-            foreach (var categoryGroup in logsByCategory)
-            {
-                html += $"<div class='category-group'>";
-                html += $"<h3 class='category-title'>{E(categoryGroup.Key)}</h3>";
-
-                // Ordenar logs por timestamp dentro de cada categoría
-                var orderedLogs = categoryGroup.OrderBy(l => l.Timestamp).ToList();
-
-                foreach (var relatedLog in orderedLogs)
-                {
-                    var logClass = relatedLog.ActionName.ToLower();
-                    html += "<div class='related-log-item'>";
-                    html += $"<div class='related-log-header'>";
-                    html += $"<span class='log-type'><span class='log-level {E(logClass)}'>{E(relatedLog.ActionName)}</span></span>";
-                    html += $"<span class='log-time'>{relatedLog.Timestamp.ToString("HH:mm:ss.fff")}</span>";
-                    html += "</div>";
-
-                    html += $"<div class='code-block log'>{E(relatedLog.ResponseData)}</div>";
-
-                    if (!string.IsNullOrEmpty(relatedLog.ErrorMessage))
-                    {
-                        html += "<h4>Error</h4>";
-                        html += $"<div class='code-block error'>{E(relatedLog.ErrorMessage)}</div>";
-
-                        if (!string.IsNullOrEmpty(relatedLog.StackTrace))
-                        {
-                            html += "<h4>Stack Trace</h4>";
-                            html += $"<div class='code-block'>{E(relatedLog.StackTrace)}</div>";
-                        }
-                    }
-
-                    html += "</div>";
-                }
-
-                html += "</div>"; // Cierre de category-group
-            }
-
-            html += "</div></div>";
-            html += "</div>";
+        if (isLogger)
+        {
+            html.Append($"<div class='hero-msg'>{E(log.ResponseData)}</div>");
+        }
+        else
+        {
+            html.Append("<div class='hero-url'>");
+            html.Append($"<div class='hero-url-text'>{E(log.HttpUrl)}{(hasQuery ? $"<span class='q'>{E(log.QueryParams)}</span>" : string.Empty)}</div>");
+            html.Append(CopyButton(fullUrl, "Copiar URL"));
+            html.Append("</div>");
         }
 
-        html += "</div>"; // Cierre del container
-        html += GenerateHtmlFooter();
+        html.Append("<div class='meta-grid'>");
+        html.Append(Meta("calendar", "Fecha/Hora", timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture), copy: true, mono: true));
+        if (isLogger)
+        {
+            html.Append(Meta("layers", "Categoría", log.RequestData, copy: true, mono: true));
+            html.Append(Meta("code", "Origen", source, copy: true, mono: true));
+            if (HasRequestContext(log))
+            {
+                html.Append(Meta("globe", "Solicitud", $"{log.Method} {log.HttpUrl}", copy: true, mono: true));
+            }
+        }
+        else
+        {
+            html.Append(Meta("box", "Controlador", log.ControllerName, copy: true));
+            html.Append(Meta("play", "Acción", log.ActionName, copy: true));
+        }
+        html.Append(Meta("globe", "IP del cliente", log.IpAddress, copy: true, mono: true));
+        html.Append(Meta("server", "Servicio", log.ServiceName));
+        html.Append(Meta("hash", "ID", log.Id, copy: true, mono: true));
+        if (!string.IsNullOrEmpty(log.RelatedRequestId))
+        {
+            html.Append(Meta("request", "Solicitud HTTP", log.RelatedRequestId, mono: true,
+                rawHtml: $"<a href='{root}/detail/{Uri.EscapeDataString(log.RelatedRequestId)}'>Ver solicitud {Icon("chevron-right")}</a>"));
+        }
+        html.Append("</div>");
+        html.Append("</section>");
 
-        return html;
+        if (!isLogger)
+        {
+            html.Append($"<pre id='curl-src' hidden>{E(BuildCurl(log, headers))}</pre>");
+        }
+
+        // Pestañas
+        var tabs = new List<(string Key, string Icon, string Label, string? Count, bool IsError)>();
+        if (isLogger)
+        {
+            tabs.Add(("message", "file", "Mensaje", null, false));
+        }
+        else
+        {
+            tabs.Add(("summary", "activity", "Resumen", null, false));
+            tabs.Add(("request", "request", "Solicitud", headers?.Count.ToString(CultureInfo.InvariantCulture), false));
+            tabs.Add(("response", "response", "Respuesta", null, false));
+        }
+        if (hasError)
+        {
+            tabs.Add(("error", "alert", "Error", null, true));
+        }
+        if (!isLogger)
+        {
+            tabs.Add(("database", "database", "Base de datos", log.DatabaseQueries.Count.ToString(CultureInfo.InvariantCulture), false));
+            tabs.Add(("logs", "file", "Logs", relatedLogs.Count.ToString(CultureInfo.InvariantCulture), relatedLogs.Any(l => l.IsError)));
+        }
+
+        html.Append("<div id='tabs-anchor'></div><div class='tabs' role='tablist'>");
+        for (var i = 0; i < tabs.Count; i++)
+        {
+            var tab = tabs[i];
+            html.Append($"<button type='button' class='tab{(tab.IsError ? " tab-error" : "")}' role='tab' data-tab='{tab.Key}' aria-selected='false' title='{tab.Label} ({i + 1})'>");
+            html.Append(Icon(tab.Icon));
+            html.Append(tab.Label);
+            if (tab.Count != null)
+            {
+                html.Append($"<span class='count'>{tab.Count}</span>");
+            }
+            html.Append($"<span class='key'>{i + 1}</span></button>");
+        }
+        html.Append("</div>");
+
+        if (isLogger)
+        {
+            html.Append(RenderLoggerMessagePanel(log, level, source));
+        }
+        else
+        {
+            html.Append(RenderSummaryPanel(log, relatedLogs, headers, hasError));
+            html.Append(RenderRequestPanel(log, headers));
+            html.Append(RenderResponsePanel(log));
+        }
+
+        if (hasError)
+        {
+            html.Append(RenderErrorPanel(log));
+        }
+
+        if (!isLogger)
+        {
+            html.Append(RenderDatabasePanel(log));
+            html.Append(RenderRelatedLogsPanel(log, relatedLogs, root));
+        }
+
+        html.Append("</main>");
+        html.Append(GenerateHtmlFooter());
+
+        return html.ToString();
+    }
+
+    private string RenderSummaryPanel(GeneralLog log, List<GeneralLog> relatedLogs, List<KeyValuePair<string, string>>? headers, bool hasError)
+    {
+        var dbTime = log.DatabaseQueries.Sum(q => q.ExecutionTime);
+        var total = log.ExecutionTime;
+        var requestBytes = Encoding.UTF8.GetByteCount(log.RequestData ?? string.Empty);
+        var responseBytes = Encoding.UTF8.GetByteCount(log.ResponseData ?? string.Empty);
+        var warnings = relatedLogs.Count(l => ParseLoggerAction(l.ActionName).Level == "Warning");
+        var errors = relatedLogs.Count(l => l.IsError);
+
+        string Mini(string tab, string icon, string color, string label, string value) =>
+            $"<button type='button' class='mini' style='--c:var(--{color})' data-goto='{tab}'><span class='mini-ico'>{Icon(icon)}</span><span class='mini-text'><span class='mini-k'>{label}</span><span class='mini-v'>{value}</span></span></button>";
+
+        var html = new StringBuilder("<div class='tab-panel' id='panel-summary' role='tabpanel'>");
+
+        if (hasError)
+        {
+            html.Append($"<div class='alert'>{Icon("alert")}<div><div class='alert-title'>La solicitud terminó con error</div><div class='alert-text'>{E(Truncate(log.ErrorMessage ?? "Error sin mensaje", 600))}</div></div>");
+            html.Append("<button type='button' class='btn small danger' data-goto='error'>Ver detalle</button></div>");
+        }
+
+        html.Append("<div class='mini-stats'>");
+        html.Append(Mini("summary", "clock", DurationVar(total), "Duración", $"{total}<small>ms</small>"));
+        html.Append(Mini("database", "database", "accent", "Consultas BD", $"{log.DatabaseQueries.Count}<small>· {dbTime} ms</small>"));
+        html.Append(Mini("logs", "file", errors > 0 ? "red" : warnings > 0 ? "amber" : "primary-2", "Logs", $"{relatedLogs.Count}{(errors + warnings > 0 ? $"<small>· {errors} err · {warnings} warn</small>" : "")}"));
+        html.Append(Mini("request", "request", "green", "Cuerpo solicitud", FormatBytes(requestBytes)));
+        html.Append(Mini("response", "response", "blue", "Cuerpo respuesta", FormatBytes(responseBytes)));
+        html.Append(Mini("request", "list", "violet", "Cabeceras", (headers?.Count ?? 0).ToString(CultureInfo.InvariantCulture)));
+        html.Append("</div>");
+
+        html.Append("<div class='grid-2'>");
+
+        // Desglose del tiempo de la solicitud
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("clock")}Desglose de tiempo</div><span class='code-meta'>{total} ms en total</span></div><div class='section-body timing'>");
+        if (total > 0)
+        {
+            var dbShare = Math.Min(100, (int)Math.Round(100.0 * dbTime / total));
+            var appTime = Math.Max(0, total - dbTime);
+            html.Append($"<div class='tbar'><span class='t-db' style='width:{dbShare}%' title='Base de datos'></span><span class='t-app' style='width:{100 - dbShare}%' title='Aplicación'></span></div>");
+            html.Append("<div class='legend'>");
+            html.Append($"<span><i style='background:#22d3ee'></i>Base de datos <b>{dbTime} ms</b> ({dbShare}%)</span>");
+            html.Append($"<span><i style='background:#a78bfa'></i>Aplicación y red <b>{appTime} ms</b> ({100 - dbShare}%)</span>");
+            html.Append("</div>");
+        }
+        else
+        {
+            html.Append("<div class='muted'>No se registró la duración de esta solicitud.</div>");
+        }
+
+        var slowestQuery = log.DatabaseQueries.OrderByDescending(q => q.ExecutionTime).FirstOrDefault();
+        if (slowestQuery != null)
+        {
+            html.Append($"<div class='info-note'>{Icon("database")}<span>Consulta más lenta: <b>{E(slowestQuery.OperationType ?? "QUERY")}</b> {E(slowestQuery.TableName)} · <b>{slowestQuery.ExecutionTime} ms</b></span><button type='button' class='btn small ghost' data-goto='database' style='margin-left:auto'>Ver consultas</button></div>");
+        }
+        html.Append("</div></section>");
+
+        // Actividad de logs por nivel
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("file")}Actividad de logs</div><span class='code-meta'>{relatedLogs.Count} mensajes</span></div><div class='section-body'>");
+        if (relatedLogs.Count == 0)
+        {
+            html.Append("<div class='muted'>Esta solicitud no generó mensajes de ILogger.</div>");
+        }
+        else
+        {
+            html.Append("<div class='level-grid'>");
+            foreach (var group in relatedLogs.GroupBy(l => ParseLoggerAction(l.ActionName).Level).OrderBy(g => LevelOrder(g.Key)))
+            {
+                html.Append($"<button type='button' class='level-card {LevelClass(group.Key)}' data-goto='logs' data-level='{E(group.Key)}'><span class='lv-k'><span class='dot'></span>{E(group.Key)}</span><span class='lv-v'>{group.Count()}</span></button>");
+            }
+            html.Append("</div>");
+        }
+        html.Append("</div></section>");
+
+        html.Append("</div>");
+
+        // Cabeceras más consultadas
+        var keyHeaders = new[] { "User-Agent", "Content-Type", "Accept", "Origin", "Referer", "Authorization", "X-Forwarded-For", "Accept-Language" };
+        var highlighted = headers?
+            .Where(h => keyHeaders.Contains(h.Key, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(h => Array.FindIndex(keyHeaders, k => k.Equals(h.Key, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        if (highlighted != null && highlighted.Count > 0)
+        {
+            html.Append($"<section class='section' style='margin-top:16px'><div class='section-head'><div class='section-title'>{Icon("list")}Cabeceras destacadas</div><button type='button' class='btn small ghost' data-goto='request'>Ver todas</button></div>");
+            html.Append(KeyValueTable(highlighted, null));
+            html.Append("</section>");
+        }
+
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string RenderRequestPanel(GeneralLog log, List<KeyValuePair<string, string>>? headers)
+    {
+        var html = new StringBuilder("<div class='tab-panel' id='panel-request' role='tabpanel'><div class='grid-2'><div class='vstack'>");
+
+        // Parámetros de la URL
+        var queryParams = ParseQueryParams(log.QueryParams);
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("filter")}Parámetros de consulta<span class='count'>{queryParams.Count}</span></div>");
+        if (queryParams.Count > 0)
+        {
+            html.Append($"<div class='section-tools'><button type='button' class='btn small ghost' data-copy='{E(log.QueryParams)}'>{Icon("copy")}{Icon("check")}Copiar</button></div>");
+        }
+        html.Append("</div>");
+        html.Append(queryParams.Count > 0 ? KeyValueTable(queryParams, "query-table") : "<div class='kv-empty'>La solicitud no tiene parámetros de consulta.</div>");
+        html.Append("</section>");
+
+        // Cabeceras
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("list")}Cabeceras<span class='count'>{headers?.Count ?? 0}</span></div>");
+        if (headers != null && headers.Count > 0)
+        {
+            html.Append("<div class='section-tools'>");
+            html.Append("<input class='input sm tool-search' type='search' placeholder='Filtrar cabeceras…' data-filter-rows='#headers-table' aria-label='Filtrar cabeceras'>");
+            html.Append($"<button type='button' class='btn small ghost' data-copy-target='#headers-raw'>{Icon("copy")}{Icon("check")}Copiar JSON</button>");
+            html.Append("</div></div>");
+            html.Append(KeyValueTable(headers, "headers-table"));
+            html.Append($"<pre id='headers-raw' hidden>{E(FormatJson(log.RequestHeaders ?? string.Empty))}</pre>");
+        }
+        else if (headers == null)
+        {
+            html.Append("</div>");
+            html.Append($"<pre class='code small wrap' data-lang='text'>{E(log.RequestHeaders)}</pre>");
+        }
+        else
+        {
+            html.Append("</div><div class='kv-empty'>No se capturaron cabeceras.</div>");
+        }
+        html.Append("</section>");
+        html.Append("</div>");
+
+        // Cuerpo de la solicitud
+        html.Append(CodeSection("request-body", "Cuerpo de la solicitud", "request", log.RequestData, $"request-{log.Id}"));
+
+        html.Append("</div></div>");
+        return html.ToString();
+    }
+
+    private static string RenderResponsePanel(GeneralLog log)
+    {
+        return "<div class='tab-panel' id='panel-response' role='tabpanel'>" +
+               CodeSection("response-body", $"Cuerpo de la respuesta · {log.StatusCode}", "response", log.ResponseData, $"response-{log.Id}") +
+               "</div>";
+    }
+
+    private static string RenderErrorPanel(GeneralLog log)
+    {
+        var html = new StringBuilder("<div class='tab-panel' id='panel-error' role='tabpanel'>");
+
+        html.Append($"<section class='section error-section'><div class='section-head'><div class='section-title'>{Icon("alert")}Mensaje de error</div>");
+        if (!string.IsNullOrEmpty(log.ErrorMessage))
+        {
+            html.Append($"<div class='section-tools'><button type='button' class='btn small ghost' data-copy='{E(log.ErrorMessage)}'>{Icon("copy")}{Icon("check")}Copiar</button></div>");
+        }
+        html.Append("</div>");
+        html.Append($"<div class='section-body'><div class='alert-text'>{(string.IsNullOrEmpty(log.ErrorMessage) ? "Sin mensaje de error." : E(log.ErrorMessage))}</div></div>");
+        html.Append("</section>");
+
+        if (!string.IsNullOrEmpty(log.StackTrace))
+        {
+            html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("layers")}Stack trace</div><div class='section-tools'>");
+            html.Append($"<button type='button' class='btn small ghost' data-toggle-fw='stack-trace' title='Ocultar los frames de System.* y Microsoft.*'>{Icon("eye")}Solo mi código</button>");
+            html.Append($"<button type='button' class='btn small ghost' data-copy-target='#stack-raw'>{Icon("copy")}{Icon("check")}Copiar</button>");
+            html.Append("</div></div>");
+            html.Append(RenderStackTrace(log.StackTrace, "stack-trace"));
+            html.Append($"<pre id='stack-raw' hidden>{E(log.StackTrace)}</pre>");
+            html.Append("</section>");
+        }
+
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string RenderDatabasePanel(GeneralLog log)
+    {
+        var queries = log.DatabaseQueries;
+        var html = new StringBuilder("<div class='tab-panel' id='panel-database' role='tabpanel'>");
+
+        if (queries.Count == 0)
+        {
+            html.Append($"<section class='section'><div class='empty'>{Icon("database")}<h3>Sin consultas</h3><p>No se registraron consultas a bases de datos durante esta solicitud.</p></div></section>");
+            html.Append("</div>");
+            return html.ToString();
+        }
+
+        var totalTime = queries.Sum(q => q.ExecutionTime);
+        var maxTime = Math.Max(1, queries.Max(q => q.ExecutionTime));
+        var allSql = string.Join(";\n\n", queries.Select(q => q.Query));
+
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("database")}Consultas<span class='count'>{queries.Count}</span><span class='code-meta'>· {totalTime} ms en total</span></div>");
+        html.Append("<div class='section-tools'>");
+        html.Append($"<button type='button' class='btn small ghost' id='query-sort' title='Ordenar por duración'>{Icon("zap")}Más lentas primero</button>");
+        html.Append($"<button type='button' class='btn small ghost' data-copy='{E(allSql)}'>{Icon("copy")}{Icon("check")}Copiar todas</button>");
+        html.Append("</div></div>");
+
+        html.Append("<div id='query-list'>");
+        for (var i = 0; i < queries.Count; i++)
+        {
+            var query = queries[i];
+            var operation = string.IsNullOrEmpty(query.OperationType) ? "QUERY" : query.OperationType!.ToUpperInvariant();
+            var width = Math.Max(2, (int)Math.Round(100.0 * query.ExecutionTime / maxTime));
+
+            html.Append($"<div class='q-item{(query.IsSuccess ? "" : " failed")}' data-ms='{query.ExecutionTime}'>");
+            html.Append("<div class='q-head'>");
+            html.Append($"<span class='q-idx'>#{i + 1}</span>");
+            html.Append($"<span class='badge {OperationClass(operation)}'>{E(operation)}</span>");
+            html.Append("<span class='q-meta'>");
+            html.Append($"<span>{Icon("database")}{E(query.DatabaseType)} · {E(query.DatabaseName)}</span>");
+            if (!string.IsNullOrEmpty(query.TableName))
+            {
+                html.Append($"<span>{Icon("layers")}{E(query.TableName)}</span>");
+            }
+            if (!string.IsNullOrEmpty(query.CallerMethod))
+            {
+                html.Append($"<span>{Icon("code")}{E(query.CallerMethod)}</span>");
+            }
+            if (query.RowCount.HasValue)
+            {
+                html.Append($"<span>{Icon("rows")}{query.RowCount} filas</span>");
+            }
+            if (!query.IsSuccess)
+            {
+                html.Append($"<span class='error-text'>{Icon("x-circle")}Fallida</span>");
+            }
+            html.Append("</span>");
+            html.Append($"<div class='q-time {DurationClass(query.ExecutionTime, 100, 500)}'><span class='q-bar'><i style='width:{width}%'></i></span><span class='dur-v'>{query.ExecutionTime} ms</span>{CopyButton(query.Query, "Copiar consulta")}</div>");
+            html.Append("</div>");
+
+            html.Append($"<pre class='code small wrap' data-lang='sql'>{E(query.Query)}</pre>");
+
+            if (!string.IsNullOrEmpty(query.Parameters))
+            {
+                html.Append("<div class='q-sub'>Parámetros</div>");
+                html.Append($"<pre class='code small wrap' data-lang='{(TryFormatJson(query.Parameters, out var parameters) ? "json" : "text")}'>{E(parameters)}</pre>");
+            }
+
+            if (!string.IsNullOrEmpty(query.ErrorMessage))
+            {
+                html.Append($"<div class='q-sub error-text'>{E(query.ErrorMessage)}</div>");
+            }
+
+            html.Append("</div>");
+        }
+        html.Append("</div></section>");
+
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private string RenderRelatedLogsPanel(GeneralLog log, List<GeneralLog> relatedLogs, string root)
+    {
+        var html = new StringBuilder("<div class='tab-panel' id='panel-logs' role='tabpanel'>");
+
+        if (relatedLogs.Count == 0)
+        {
+            html.Append($"<section class='section'><div class='empty'>{Icon("file")}<h3>Sin logs</h3><p>Esta solicitud no generó mensajes de ILogger.</p></div></section>");
+            html.Append("</div>");
+            return html.ToString();
+        }
+
+        var requestStart = ToDisplayTime(log.Timestamp);
+        var parsed = relatedLogs
+            .OrderBy(l => l.Timestamp)
+            .Select(l => (Log: l, Info: ParseLoggerAction(l.ActionName)))
+            .ToList();
+
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("file")}Logs de la aplicación<span class='count'>{relatedLogs.Count}</span></div>");
+        html.Append("<div class='section-tools'><div class='chips'>");
+        html.Append($"<button type='button' class='chip all active' data-level-chip=''>Todos<span class='count'>{relatedLogs.Count}</span></button>");
+        foreach (var group in parsed.GroupBy(p => p.Info.Level).OrderBy(g => LevelOrder(g.Key)))
+        {
+            html.Append($"<button type='button' class='chip {LevelClass(group.Key)}' data-level-chip='{E(group.Key)}'><span class='dot'></span>{E(group.Key)}<span class='count'>{group.Count()}</span></button>");
+        }
+        html.Append("</div>");
+        html.Append("<input class='input sm tool-search' id='log-search' type='search' placeholder='Buscar en los logs…' aria-label='Buscar en los logs'>");
+        html.Append("<span class='match-info' id='log-count'></span>");
+        html.Append("</div></div>");
+
+        html.Append("<div id='log-list'>");
+        foreach (var (relatedLog, info) in parsed)
+        {
+            var offset = (relatedLog.Timestamp - requestStart).TotalMilliseconds;
+            html.Append($"<div class='log-row lv-{E(info.Level.ToLowerInvariant())}' data-level='{E(info.Level)}'>");
+            html.Append($"<div class='log-time'>{relatedLog.Timestamp:HH:mm:ss.fff}{(offset >= 0 && offset < 86_400_000 ? $"<div class='log-src'>+{offset.ToString("0", CultureInfo.InvariantCulture)} ms</div>" : "")}</div>");
+            html.Append($"<div>{LevelBadge(info.Level)}</div>");
+            html.Append("<div class='log-main'>");
+            html.Append($"<div class='log-msg'>{E(relatedLog.ResponseData)}</div>");
+            html.Append($"<div class='log-cat'>{E(relatedLog.RequestData)}{(string.IsNullOrEmpty(info.Source) ? "" : $" <span class='log-src'>· {E(info.Source)}</span>")}</div>");
+            if (!string.IsNullOrEmpty(relatedLog.ErrorMessage))
+            {
+                html.Append($"<details class='log-err'><summary>{E(relatedLog.ErrorMessage)}</summary>");
+                if (!string.IsNullOrEmpty(relatedLog.StackTrace))
+                {
+                    html.Append(RenderStackTrace(relatedLog.StackTrace, null));
+                }
+                html.Append("</details>");
+            }
+            html.Append("</div>");
+            html.Append($"<div class='row-actions'>{CopyButton(relatedLog.ResponseData ?? string.Empty, "Copiar mensaje")}<a class='btn icon small ghost' href='{root}/detail/{Uri.EscapeDataString(relatedLog.Id ?? string.Empty)}' title='Abrir este log'>{Icon("external")}</a></div>");
+            html.Append("</div>");
+        }
+        html.Append("</div></section>");
+
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string RenderLoggerMessagePanel(GeneralLog log, string level, string source)
+    {
+        var html = new StringBuilder("<div class='tab-panel' id='panel-message' role='tabpanel'><div class='grid-2'>");
+        html.Append(CodeSection("log-message", "Mensaje", "file", log.ResponseData, $"log-{log.Id}"));
+
+        var context = new List<KeyValuePair<string, string>>
+        {
+            new("Nivel", level),
+            new("Categoría", log.RequestData ?? string.Empty),
+            new("Origen", source),
+            new("Método", HasRequestContext(log) ? log.Method : string.Empty),
+            new("URL", HasRequestContext(log) ? log.HttpUrl : string.Empty),
+            new("IP", log.IpAddress),
+            new("Servicio", log.ServiceName)
+        };
+        html.Append($"<section class='section'><div class='section-head'><div class='section-title'>{Icon("info")}Contexto</div></div>");
+        html.Append(KeyValueTable(context.Where(c => !string.IsNullOrEmpty(c.Value)).ToList(), null));
+        html.Append("</section>");
+
+        html.Append("</div></div>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Sección con un visor de código: resaltado, búsqueda, ajuste de línea, expandir, copiar y descargar.
+    /// </summary>
+    private static string CodeSection(string id, string title, string icon, string? content, string downloadName)
+    {
+        var html = new StringBuilder("<section class='section'>");
+        html.Append($"<div class='section-head'><div class='section-title'>{Icon(icon)}{E(title)}</div>");
+
+        if (string.IsNullOrEmpty(content))
+        {
+            html.Append($"</div><div class='empty'>{Icon("inbox")}<h3>Sin contenido</h3><p>No se capturó ningún cuerpo.</p></div></section>");
+            return html.ToString();
+        }
+
+        var isJson = TryFormatJson(content, out var formatted);
+        var lines = formatted.Count(c => c == '\n') + 1;
+        var bytes = Encoding.UTF8.GetByteCount(content);
+
+        html.Append($"<div class='section-tools' data-code-tools='{id}'>");
+        html.Append($"<span class='code-meta'>{(isJson ? "JSON" : "Texto")} · {FormatBytes(bytes)} · {lines} líneas</span>");
+        html.Append("<input class='input sm tool-search' type='search' placeholder='Buscar…  (Enter: siguiente)' aria-label='Buscar en el contenido'><span class='match-info'></span>");
+        html.Append($"<button type='button' class='btn small ghost icon' data-act='wrap' title='Ajustar líneas'>{Icon("wrap")}</button>");
+        html.Append($"<button type='button' class='btn small ghost icon' data-act='expand' title='Mostrar todo el contenido'>{Icon("maximize")}</button>");
+        html.Append($"<button type='button' class='btn small ghost icon' data-act='download' data-name='{E(downloadName)}.{(isJson ? "json" : "txt")}' title='Descargar'>{Icon("download")}</button>");
+        html.Append($"<button type='button' class='btn small ghost' data-copy-target='#{id}'>{Icon("copy")}{Icon("check")}Copiar</button>");
+        html.Append("</div></div>");
+        html.Append($"<pre class='code{(isJson ? "" : " wrap")}' id='{id}' data-lang='{(isJson ? "json" : "text")}'>{E(formatted)}</pre>");
+        html.Append("</section>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Tabla clave/valor con botón de copiar por fila. Los valores enmascarados se marcan como tales.
+    /// </summary>
+    private static string KeyValueTable(List<KeyValuePair<string, string>> rows, string? id)
+    {
+        var html = new StringBuilder($"<table class='kv'{(id == null ? "" : $" id='{id}'")}><tbody>");
+        foreach (var row in rows)
+        {
+            var masked = row.Value == "*****";
+            html.Append($"<tr data-row><td class='k'>{E(row.Key)}</td>");
+            html.Append($"<td class='v'>{(masked ? $"<span class='masked'>{Icon("eye")}enmascarado</span>" : E(row.Value))}</td>");
+            html.Append($"<td class='a'>{(masked ? "" : CopyButton(row.Value, $"Copiar {row.Key}"))}</td></tr>");
+        }
+        html.Append("</tbody></table>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Stack trace con los frames del framework atenuados y la ubicación en el código resaltada.
+    /// </summary>
+    private static string RenderStackTrace(string stackTrace, string? id)
+    {
+        var html = new StringBuilder($"<div class='stack'{(id == null ? "" : $" id='{id}'")}>");
+        foreach (var rawLine in stackTrace.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = rawLine.TrimEnd();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            var trimmed = line.TrimStart();
+            var isFramework = trimmed.StartsWith("at System.", StringComparison.Ordinal) ||
+                              trimmed.StartsWith("at Microsoft.", StringComparison.Ordinal) ||
+                              trimmed.StartsWith("---", StringComparison.Ordinal);
+            var sourceIndex = line.LastIndexOf(" in ", StringComparison.Ordinal);
+            var css = isFramework ? "fw" : sourceIndex > 0 ? "app" : string.Empty;
+
+            html.Append($"<span class='st-line {css}'>");
+            if (sourceIndex > 0 && !isFramework)
+            {
+                html.Append(E(line.Substring(0, sourceIndex)));
+                html.Append($" in <span class='st-src'>{E(line.Substring(sourceIndex + 4))}</span>");
+            }
+            else
+            {
+                html.Append(E(line));
+            }
+            html.Append("</span>");
+        }
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    /// <summary>
+    /// Construye un comando cURL que reproduce la solicitud capturada (las cabeceras enmascaradas se mantienen así).
+    /// </summary>
+    private static string BuildCurl(GeneralLog log, List<KeyValuePair<string, string>>? headers)
+    {
+        static string Quote(string value) => "'" + value.Replace("'", "'\\''") + "'";
+
+        var headerList = headers ?? new List<KeyValuePair<string, string>>();
+        var host = headerList.FirstOrDefault(h => h.Key.Equals("Host", StringComparison.OrdinalIgnoreCase)).Value;
+        var scheme = headerList.FirstOrDefault(h => h.Key.Equals("X-Forwarded-Proto", StringComparison.OrdinalIgnoreCase)).Value;
+        var url = (string.IsNullOrEmpty(host) ? string.Empty : $"{(string.IsNullOrEmpty(scheme) ? "http" : scheme)}://{host}") +
+                  log.HttpUrl + (HasQuery(log.QueryParams) ? log.QueryParams : string.Empty);
+
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Host", "Content-Length", "Connection", "Accept-Encoding" };
+        var curl = new StringBuilder($"curl -X {log.Method} {Quote(url)}");
+        foreach (var header in headerList.Where(h => !skip.Contains(h.Key) && !h.Key.StartsWith(":", StringComparison.Ordinal)))
+        {
+            curl.Append($" \\\n  -H {Quote($"{header.Key}: {header.Value}")}");
+        }
+
+        if (!string.IsNullOrEmpty(log.RequestData) && !HttpMethods.IsGet(log.Method) && !HttpMethods.IsHead(log.Method))
+        {
+            curl.Append($" \\\n  --data-raw {Quote(log.RequestData)}");
+        }
+
+        return curl.ToString();
     }
 
     /// <summary>
@@ -807,26 +1196,14 @@ public class HubbleController
         await _hubbleService.DeleteAllLogsAsync();
 
         var html = GenerateHtmlHeader("Hubble - Logs eliminados", true);
-
-        html += "<div class='container'>";
-        html += "<div class='header'>";
-        html += "<div class='header-left'>";
-        html += GetHubbleLogo();
-        html += "</div>";
-
-        // Botón de logout si la autenticación está habilitada
-        html += "<div class='header-right'>";
-        html += LogoutButton();
-        html += "</div>";
-        html += "</div>";
-
+        html += TopBar("logs");
+        html += "<main class='container'>";
         html += "<div class='card success-card'>";
         html += "<h2>Operación exitosa</h2>";
         html += "<p>Todos los logs han sido eliminados correctamente.</p><br>";
-        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>{Icon("arrow-left")}Volver a la lista</a>";
         html += "</div>";
-
-        html += "</div>";
+        html += "</main>";
         html += GenerateHtmlFooter();
 
         return html;
@@ -841,29 +1218,12 @@ public class HubbleController
     private string GenerateErrorPage(string title, string message)
     {
         var html = GenerateHtmlHeader($"Hubble - {title}", true);
-
-        html += "<div class='container'>";
-        html += "<div class='header'>";
-        html += "<div class='header-left'>";
-        html += GetHubbleLogo();
-        html += "<div class='action-buttons'>";
-        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>Volver a la lista</a>";
+        html += TopBar("logs");
+        html += "<main class='container'>";
+        html += $"<div class='card error-card'><h2>{E(title)}</h2><p>{E(message)}</p><br>";
+        html += $"<a href='{_prefixPath}{_basePath}' class='btn primary'>{Icon("arrow-left")}Volver a la lista</a>";
         html += "</div>";
-        html += "</div>";
-
-        // Botón de logout si la autenticación está habilitada
-        html += "<div class='header-right'>";
-        html += LogoutButton();
-        html += "</div>";
-        html += "</div>";
-
-        html += $"<h2 class='page-title'>{E(title)}</h2>";
-
-        html += "<div class='card error-card'>";
-        html += $"<p>{E(message)}</p>";
-        html += "</div>";
-
-        html += "</div>";
+        html += "</main>";
         html += GenerateHtmlFooter();
 
         return html;
@@ -874,6 +1234,8 @@ public class HubbleController
     /// Todo dato que proviene de los logs debe pasar por aquí: puede contener contenido controlado por un atacante.
     /// </summary>
     private static string E(object? value) => HubbleHtml.Encode(value);
+
+    private static string Icon(string name, string? extraClass = null) => HubbleAssets.Icon(name, extraClass);
 
     /// <summary>
     /// Campo oculto con el token antiforgery para los formularios que modifican datos.
@@ -896,8 +1258,214 @@ public class HubbleController
     private string LogoutButton()
     {
         return _options.RequireAuthentication
-            ? $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>"
+            ? $"<a href='{_prefixPath}{_basePath}/logout' class='btn small ghost' title='Cerrar sesión'>{Icon("logout")}<span>Cerrar sesión</span></a>"
             : string.Empty;
+    }
+
+    /// <summary>
+    /// Barra superior común a todas las páginas del dashboard.
+    /// </summary>
+    private string TopBar(string active)
+    {
+        var root = $"{_prefixPath}{_basePath}";
+        return "<header class='topbar'><div class='topbar-inner'>" +
+               $"<div class='brand'>{GetHubbleLogo()}<div class='brand-meta'><span class='app-title'>Hubble for .NET</span><span class='app-version'>{E(_version)}</span></div></div>" +
+               "<nav class='nav'>" +
+               $"<a href='{root}'{(active == "logs" ? " class='active'" : "")}>{Icon("list")}<span>Logs</span></a>" +
+               $"<a href='{root}/config'{(active == "config" ? " class='active'" : "")}>{Icon("settings")}<span>Configuración</span></a>" +
+               "</nav>" +
+               "<div class='topbar-right'>" +
+               $"<button type='button' class='btn small ghost icon' data-open-dialog='shortcuts-dialog' title='Atajos de teclado (?)'>{Icon("keyboard")}</button>" +
+               LogoutButton() +
+               "</div></div></header>";
+    }
+
+    /// <summary>
+    /// Celda de la cuadrícula de metadatos del detalle, con botón de copiar opcional.
+    /// </summary>
+    private static string Meta(string icon, string label, string? value, bool copy = false, bool mono = false, string? rawHtml = null)
+    {
+        var display = rawHtml ?? (string.IsNullOrEmpty(value) ? "<span class='muted'>—</span>" : E(value));
+        var copyButton = copy && !string.IsNullOrEmpty(value) ? CopyButton(value!, $"Copiar {label.ToLowerInvariant()}") : string.Empty;
+        return $"<div class='meta'><div class='meta-k'>{Icon(icon)}{E(label)}</div><div class='meta-v{(mono ? " mono" : "")}' title='{E(value)}'>{display}</div>{copyButton}</div>";
+    }
+
+    private static string CopyButton(string text, string title = "Copiar", string extraClass = "ghost")
+    {
+        return $"<button type='button' class='btn icon small {extraClass}' data-copy='{E(text)}' title='{E(title)}' aria-label='{E(title)}'>{Icon("copy")}{Icon("check")}</button>";
+    }
+
+    private static bool IsLoggerEntry(GeneralLog log) => log.ControllerName == "ApplicationLogger";
+
+    /// <summary>
+    /// Los logs de ILogger escritos fuera de una solicitud HTTP llevan "No Method" / "No URL available".
+    /// </summary>
+    private static bool HasRequestContext(GeneralLog log) => !string.IsNullOrEmpty(log.Method) && log.Method != "No Method";
+
+    private static bool HasQuery(string? queryParams) => !string.IsNullOrEmpty(queryParams) && queryParams != "?";
+
+    private static string Truncate(string? value, int max) =>
+        value == null ? string.Empty : value.Length <= max ? value : value.Substring(0, max) + "…";
+
+    private static string MethodClass(string? method) => (method ?? string.Empty).ToUpperInvariant() switch
+    {
+        "GET" => "m-get",
+        "POST" => "m-post",
+        "PUT" => "m-put",
+        "PATCH" => "m-patch",
+        "DELETE" => "m-delete",
+        "OPTIONS" => "m-options",
+        "HEAD" => "m-head",
+        _ => "m-other"
+    };
+
+    private static string MethodBadge(string? method, bool large = false) =>
+        string.IsNullOrEmpty(method) || method == "No Method"
+            ? "<span class='muted'>—</span>"
+            : $"<span class='badge {MethodClass(method)}{(large ? " lg" : "")}'>{E(method)}</span>";
+
+    private static int StatusFamily(int statusCode) => statusCode >= 100 && statusCode < 600 ? statusCode / 100 : 0;
+
+    private static string StatusPill(int statusCode, bool withReason = false)
+    {
+        if (statusCode <= 0)
+        {
+            return "<span class='badge pill s-0'>—</span>";
+        }
+
+        var reason = withReason ? ReasonPhrases.GetReasonPhrase(statusCode) : string.Empty;
+        return $"<span class='badge pill s-{StatusFamily(statusCode)}{(withReason ? " lg" : "")}'><span class='dot'></span>{statusCode}{(string.IsNullOrEmpty(reason) ? "" : " " + E(reason))}</span>";
+    }
+
+    /// <summary>
+    /// Separa el nivel y el origen del ActionName de un log de ILogger ("Warning [Archivo.cs:12 → Metodo]").
+    /// </summary>
+    private static (string Level, string Source) ParseLoggerAction(string? actionName)
+    {
+        var value = actionName ?? string.Empty;
+        var bracket = value.IndexOf(" [", StringComparison.Ordinal);
+        return bracket < 0
+            ? (value.Trim(), string.Empty)
+            : (value.Substring(0, bracket).Trim(), value.Substring(bracket + 2).TrimEnd(']').Trim());
+    }
+
+    private static string LevelClass(string level)
+    {
+        var normalized = level.ToLowerInvariant();
+        return normalized is "information" or "warning" or "error" or "critical" or "debug" or "trace" ? $"l-{normalized}" : "l-none";
+    }
+
+    private static int LevelOrder(string level) => level switch
+    {
+        "Critical" => 0,
+        "Error" => 1,
+        "Warning" => 2,
+        "Information" => 3,
+        "Debug" => 4,
+        "Trace" => 5,
+        _ => 6
+    };
+
+    private static string LevelBadge(string level) =>
+        $"<span class='badge pill plain {LevelClass(level)}'><span class='dot'></span>{E(string.IsNullOrEmpty(level) ? "Log" : level)}</span>";
+
+    private static string OperationClass(string operation) => operation switch
+    {
+        "SELECT" or "FIND" or "QUERY" => "m-get",
+        "INSERT" or "CREATE" => "m-post",
+        "UPDATE" or "MERGE" or "UPSERT" => "m-put",
+        "DELETE" or "DROP" => "m-delete",
+        _ => "m-patch"
+    };
+
+    private static string DurationClass(long ms, long mid = 300, long slow = 1000) => ms >= slow ? "slow" : ms >= mid ? "mid" : "fast";
+
+    private static string DurationColor(long ms) => DurationClass(ms) switch { "slow" => "s-5", "mid" => "s-4", _ => "s-2" };
+
+    private static string DurationVar(long ms) => DurationClass(ms) switch { "slow" => "red", "mid" => "amber", _ => "green" };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        return bytes < 1024 * 1024
+            ? (bytes / 1024.0).ToString("0.#", CultureInfo.InvariantCulture) + " KB"
+            : (bytes / 1048576.0).ToString("0.##", CultureInfo.InvariantCulture) + " MB";
+    }
+
+    /// <summary>
+    /// Texto relativo inicial ("hace 5 min"); el navegador lo mantiene actualizado.
+    /// </summary>
+    private static string FormatAgo(double seconds)
+    {
+        var s = Math.Max(0, Math.Round(seconds));
+        if (s < 5) return "ahora mismo";
+        if (s < 60) return $"hace {s} s";
+        var minutes = Math.Floor(s / 60);
+        if (minutes < 60) return $"hace {minutes} min";
+        var hours = Math.Floor(minutes / 60);
+        if (hours < 24) return $"hace {hours} h";
+        var days = Math.Floor(hours / 24);
+        return days == 1 ? "hace 1 día" : $"hace {days} días";
+    }
+
+    /// <summary>
+    /// Convierte a la zona horaria configurada las fechas que llegan en UTC (el listado ya viene convertido).
+    /// </summary>
+    private DateTime ToDisplayTime(DateTime timestamp) =>
+        timestamp.Kind == DateTimeKind.Utc ? TimeZoneInfo.ConvertTimeFromUtc(timestamp, _timeZone) : timestamp;
+
+    /// <summary>
+    /// Segundos transcurridos desde la fecha del log, tenga o no aplicada la zona horaria configurada.
+    /// </summary>
+    private double AgeSeconds(DateTime timestamp) => timestamp.Kind == DateTimeKind.Utc
+        ? (DateTime.UtcNow - timestamp).TotalSeconds
+        : (TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _timeZone) - timestamp).TotalSeconds;
+
+    /// <summary>
+    /// Lee las cabeceras serializadas como objeto JSON. Devuelve null si no tienen ese formato.
+    /// </summary>
+    private static List<KeyValuePair<string, string>>? ParseHeaders(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<KeyValuePair<string, string>>();
+        }
+
+        try
+        {
+            var headers = JsonConvert.DeserializeObject<Dictionary<string, object?>>(json!);
+            return headers?
+                .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(h => new KeyValuePair<string, string>(h.Key, h.Value?.ToString() ?? string.Empty))
+                .ToList();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<KeyValuePair<string, string>> ParseQueryParams(string? queryString)
+    {
+        if (!HasQuery(queryString))
+        {
+            return new List<KeyValuePair<string, string>>();
+        }
+
+        try
+        {
+            return QueryHelpers.ParseQuery(queryString)
+                .SelectMany(p => p.Value.Select(v => new KeyValuePair<string, string>(p.Key, v ?? string.Empty)))
+                .ToList();
+        }
+        catch
+        {
+            return new List<KeyValuePair<string, string>> { new("query", queryString!) };
+        }
     }
 
     /// <summary>
@@ -960,825 +1528,46 @@ public class HubbleController
     }
 
     /// <summary>
-    /// Genera el encabezado HTML con estilos modernos.
+    /// Genera el encabezado HTML con los estilos del dashboard.
     /// </summary>
     /// <param name="title">Título de la página</param>
     /// <param name="showLogout">Indica si se debe mostrar el botón de logout</param>
     /// <returns>HTML del encabezado</returns>
     private string GenerateHtmlHeader(string title, bool showLogout = false)
     {
-        return $@"<!DOCTYPE html>
-<html lang='es'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>{E(title)}</title>
-    <style>
-        :root {{
-            --primary-color: #6200ee;
-            --primary-light: #bb86fc;
-            --secondary-color: #03dac6;
-            --background: #121212;
-            --surface: #1e1e1e;
-            --error: #cf6679;
-            --success: #4caf50;
-            --danger: #f44336;
-            --text-primary: #ffffff;
-            --text-secondary: rgba(255, 255, 255, 0.7);
-            --border-color: #333333;
-        }}
-        
-        * {{
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }}
-        
-        body {{
-            background-color: var(--background);
-            color: var(--text-primary);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-        }}
-        
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }}
-        
-        .header {{
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        
-        .header-left {{
-            display: flex;
-            align-items: center;
-        }}
-        
-        .header-right {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }}
-        
-        .logo-container {{
-            display: flex;
-            align-items: center;
-            margin-right: 15px;
-        }}
-        
-        .logo-link {{
-            display: block;
-            transition: transform 0.3s ease;
-        }}
-        
-        .logo-link:hover {{
-            transform: scale(1.05);
-        }}
-        
-        .hubble-logo {{
-            max-height: 40px;
-            max-width: 120px;
-        }}
-        
-        /* Estilos especiales para las estrellas del logo */
-        .hubble-logo circle {{
-            transition: fill 0.3s ease, r 0.3s ease;
-        }}
-        
-        .logo-link:hover .hubble-logo circle[fill='#BB86FC'],
-        .logo-link:hover .hubble-logo circle[fill='#03DAC6'],
-        .logo-link:hover .hubble-logo circle[fill='#FFFFFF'] {{
-            filter: brightness(1.2);
-        }}
-        
-        .logo-link:hover .hubble-logo text {{
-            fill: var(--primary-light);
-            transition: fill 0.3s ease;
-        }}
-        
-        /* Estilos para el texto del creador */
-        .creator-text {{
-            opacity: 0.8;
-            transition: opacity 0.3s ease;
-        }}
-        
-        .logo-link:hover .creator-text {{
-            opacity: 1;
-        }}
-        
-        h1 {{
-            color: var(--primary-light);
-            margin-bottom: 10px;
-        }}
-        
-        /* Estilos para el título y versión de la aplicación */
-        .app-title {{
-            font-size: 1em;
-            font-weight: 500;
-            color: var(--primary-light);
-        }}
-        
-        .app-version {{
-            font-size: 0.7em;
-            color: var(--secondary-color);
-            opacity: 0.8;
-            margin-left: 5px;
-        }}
-        
-        h2 {{
-            color: var(--primary-light);
-            margin-bottom: 15px;
-        }}
-        
-        h3 {{
-            color: var(--text-secondary);
-            margin: 15px 0 10px;
-        }}
-        
-        .filter-form {{
-            background-color: var(--surface);
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 15px;
-            flex-wrap: wrap;
-        }}
-        
-        .filter-form form {{
-            display: flex;
-            gap: 10px;
-            flex: 1;
-            flex-wrap: wrap;
-        }}
-        
-        .input-field {{
-            background-color: rgba(255, 255, 255, 0.1);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            padding: 10px 15px;
-            border-radius: 4px;
-            flex-grow: 1;
-            min-width: 150px;
-        }}
-        
-        /* Solución para todos los navegadores */
-        .select-wrapper {{
-            position: relative;
-            min-width: 150px;
-            flex-grow: 1;
-        }}
-        
-        .select-field {{
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            background-color: var(--surface) !important;
-            border: 1px solid var(--border-color);
-            color: var(--text-primary) !important;
-            padding: 10px 15px;
-            border-radius: 4px;
-            width: 100%;
-            cursor: pointer;
-        }}
-        
-        /* Forzar tema oscuro en todas las opciones */
-        select, option, select.select-field, option.select-option {{
-            background-color: var(--surface) !important;
-            color: var(--text-primary) !important;
-        }}
-        
-        /* Estilos globales para los select nativos */
-        select {{
-            background-color: var(--surface) !important;
-            color: var(--text-primary) !important;
-        }}
-        
-        select option {{
-            background-color: var(--surface) !important;
-            color: var(--text-primary) !important;
-            padding: 8px !important;
-        }}
-        
-        .select-wrapper::after {{
-            content: '';
-            position: absolute;
-            top: 50%;
-            right: 15px;
-            transform: translateY(-50%);
-            width: 0;
-            height: 0;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 5px solid var(--text-primary);
-            pointer-events: none;
-        }}
-        
-        .trash-icon {{
-            display: inline-block;
-            margin-right: 5px;
-            font-style: normal;
-        }}
-        
-        .filter-icon {{
-            display: inline-block;
-            margin-right: 5px;
-            font-style: normal;
-        }}
-        
-        .eye-icon {{
-            display: inline-block;
-            margin-right: 3px;
-            font-style: normal;
-        }}
-        
-        .back-icon {{
-            display: inline-block;
-            margin-right: 5px;
-            font-style: normal;
-        }}
-        
-        .icon {{
-            display: inline-block;
-            margin-right: 5px;
-            font-style: normal;
-            vertical-align: middle;
-        }}
-        
-        .table-actions {{
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 20px;
-        }}
-        
-        .btn {{
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: 500;
-            transition: background-color 0.3s;
-        }}
-        
-        .btn:hover {{
-            background-color: var(--primary-light);
-        }}
-        
-        .btn.secondary {{
-            background-color: transparent;
-            border: 1px solid var(--primary-light);
-            color: var(--primary-light);
-        }}
-        
-        .btn.secondary:hover {{
-            background-color: rgba(187, 134, 252, 0.1);
-        }}
-        
-        .btn.danger {{
-            background-color: var(--danger);
-            color: white;
-        }}
-        
-        .btn.danger:hover {{
-            background-color: #d32f2f;
-        }}
-        
-        .btn.small {{
-            padding: 5px 10px;
-            font-size: 0.9em;
-        }}
-        
-        .table-container {{
-            overflow-x: auto;
-            margin-bottom: 20px;
-        }}
-        
-        .data-table {{
-            width: 100%;
-            border-collapse: collapse;
-            background-color: var(--surface);
-            border-radius: 8px;
-            overflow: hidden;
-        }}
-        
-        .data-table th {{
-            background-color: rgba(187, 134, 252, 0.1);
-            color: var(--primary-light);
-            text-align: left;
-            padding: 15px;
-            font-weight: 500;
-        }}
-        
-        .data-table td {{
-            padding: 12px 15px;
-            border-top: 1px solid var(--border-color);
-        }}
-        
-        .data-table tr:hover {{
-            background-color: rgba(255, 255, 255, 0.05);
-        }}
-        
-        .data-table tr.error {{
-            background-color: rgba(207, 102, 121, 0.1);
-        }}
-        
-        .data-table tr.error:hover {{
-            background-color: rgba(207, 102, 121, 0.2);
-        }}
-        
-        /* Estilo para nuevos servicios detectados en tiempo real */
-        .data-table tr.new-service {{
-            background-color: rgba(255, 193, 7, 0.3);
-            animation: highlight-new 3s ease-out infinite alternate;
-            border-left: 4px solid #ffc107;
-            position: relative;
-        }}
-        
-        .data-table tr.new-service:hover {{
-            background-color: rgba(255, 193, 7, 0.5);
-        }}
-        
-        .data-table tr.error.new-service {{
-            background-color: rgba(207, 102, 121, 0.15);
-            border-left: 4px solid #ffc107;
-        }}
-        
-        .new-service-label {{
-            display: inline-block;
-            background-color: #ffc107;
-            color: #000;
-            font-size: 0.6em;
-            padding: 2px 5px;
-            border-radius: 3px;
-            margin-left: 5px;
-            font-weight: bold;
-            animation: pulse 1s infinite;
-            vertical-align: middle;
-        }}
-        
-        @keyframes pulse {{
-            0% {{ opacity: 0.7; }}
-            50% {{ opacity: 1; }}
-            100% {{ opacity: 0.7; }}
-        }}
-        
-        @keyframes highlight-new {{
-            0% {{ background-color: rgba(255, 193, 7, 0.3); }}
-            100% {{ background-color: rgba(255, 193, 7, 0.15); }}
-        }}
-        
-        .url-cell {{
-            max-width: 300px;
-            padding: 8px 12px !important;
-        }}
-        
-        .url-path {{
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-            display: block;
-        }}
-        
-        .url-params {{
-            color: var(--primary-light);
-            font-size: 0.85em;
-            margin-top: 3px;
-            padding: 2px 5px;
-            background-color: rgba(187, 134, 252, 0.1);
-            border-radius: 3px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 100%;
-            display: block;
-        }}
-        
-        .pagination {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 15px;
-            margin-top: 20px;
-        }}
-        
-        .pagination-info {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background-color: var(--surface);
-            padding: 10px 15px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-            color: var(--text-secondary);
-            font-size: 0.9em;
-        }}
-        
-        .page-info {{
-            color: var(--text-secondary);
-        }}
-        
-        .pagination-btn {{
-            display: inline-flex;
-            justify-content: center;
-            align-items: center;
-            min-width: 40px;
-            height: 40px;
-            padding: 0 10px;
-            border-radius: 4px;
-            background-color: rgba(255, 255, 255, 0.05);
-            color: var(--primary-light);
-            text-decoration: none;
-            transition: all 0.2s ease;
-        }}
-        
-        .pagination-btn:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
-        }}
-        
-        .pagination-btn.disabled {{
-            opacity: 0.5;
-            cursor: not-allowed;
-            pointer-events: none;
-        }}
-        
-        .pagination-icon {{
-            font-size: 1.2em;
-        }}
-        
-        .page-navigator {{
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }}
-        
-        .page-number {{
-            display: inline-flex;
-            justify-content: center;
-            align-items: center;
-            min-width: 40px;
-            height: 40px;
-            border-radius: 4px;
-            text-decoration: none;
-            color: var(--text-primary);
-            background-color: rgba(255, 255, 255, 0.05);
-            transition: all 0.2s ease;
-        }}
-        
-        .page-number:hover {{
-            background-color: rgba(255, 255, 255, 0.1);
-        }}
-        
-        .page-number.current {{
-            background-color: var(--primary-color);
-            color: white;
-            font-weight: bold;
-        }}
-        
-        .page-ellipsis {{
-            color: var(--text-secondary);
-            padding: 0 5px;
-        }}
-        
-        .card {{
-            background-color: var(--surface);
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }}
-        
-        .error-card {{
-            background-color: rgba(207, 102, 121, 0.1);
-            border-left: 4px solid var(--error);
-        }}
-        
-        .success-card {{
-            background-color: rgba(76, 175, 80, 0.1);
-            border-left: 4px solid var(--success);
-        }}
-        
-        .info-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 15px;
-        }}
-        
-        .info-item {{
-            padding: 10px;
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-        }}
-        
-        .info-item span:first-child {{
-            color: var(--text-secondary);
-            margin-right: 5px;
-        }}
-        
-        /* Estilos para URL con QueryParams en la página de detalle */
-        .url-item {{
-            margin-top: 15px;
-            padding: 15px;
-            background-color: #292929;
-            border-radius: 4px;
-            border-left: 4px solid var(--primary-light);
-        }}
-        
-        .url-label {{
-            display: block;
-            color: var(--text-secondary);
-            margin-bottom: 10px;
-            font-weight: 500;
-        }}
-        
-        .url-value {{
-            display: block;
-            word-break: break-all;
-            color: var(--text-primary);
-            font-family: 'Consolas', 'Monaco', monospace;
-        }}
-        
-        .url-params-line {{
-            display: block;
-            margin-top: 10px;
-            padding: 8px 12px;
-            background-color: rgba(187, 134, 252, 0.1);
-            border-radius: 4px;
-            color: var(--primary-light);
-            font-family: 'Consolas', 'Monaco', monospace;
-            word-break: break-all;
-        }}
-        
-        .url-detail {{
-            display: inline-flex;
-            flex-direction: column;
-            max-width: 100%;
-        }}
-        
-        .error-text {{
-            color: var(--error);
-        }}
-        
-        .success-text {{
-            color: var(--success);
-        }}
-        
-        .code-block {{
-            background-color: rgba(0, 0, 0, 0.3);
-            padding: 15px;
-            border-radius: 4px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.9em;
-            margin-bottom: 15px;
-        }}
-        
-        .code-block.sql {{
-            color: #9cdcfe;
-        }}
-        
-        .query-item {{
-            background-color: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }}
-        
-        .query-header {{
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        
-        .query-type {{
-            color: var(--primary-light);
-            font-weight: bold;
-        }}
-        
-        .query-db {{
-            color: var(--text-secondary);
-        }}
-        
-        .query-time {{
-            color: var(--secondary-color);
-        }}
-        
-        .query-meta {{
-            color: var(--text-secondary);
-            font-size: 0.9em;
-            margin-top: 5px;
-        }}
-        
-        .page-title {{
-            color: var(--primary-light);
-            margin-bottom: 20px;
-            text-align: center;
-        }}
-        
-        /* Estilos para los niveles de log de ILogger */
-        .log-level {{
-            display: inline-block;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.85em;
-            font-weight: 500;
-        }}
-        
-        .log-level.information {{
-            background-color: rgba(3, 218, 198, 0.2);
-            color: var(--secondary-color);
-        }}
-        
-        .log-level.warning {{
-            background-color: rgba(255, 193, 7, 0.2);
-            color: #ffc107;
-        }}
-        
-        .log-level.error, .log-level.critical {{
-            background-color: rgba(207, 102, 121, 0.2);
-            color: var(--error);
-        }}
-        
-        .log-level.debug, .log-level.trace {{
-            background-color: rgba(255, 255, 255, 0.1);
-            color: var(--text-secondary);
-        }}
-        
-        /* Estilos para los logs relacionados */
-        .related-log-item {{
-            background-color: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }}
-        
-        .related-log-header {{
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        
-        .log-type {{
-            font-weight: bold;
-        }}
-        
-        .log-category {{
-            color: var(--text-secondary);
-            max-width: 60%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-        
-        .log-time {{
-            color: var(--secondary-color);
-            font-family: monospace;
-        }}
-        
-        .code-block.log {{
-            background-color: rgba(0, 0, 0, 0.3);
-            border-left: 3px solid var(--secondary-color);
-        }}
-        
-        .code-block.error {{
-            background-color: rgba(0, 0, 0, 0.3);
-            border-left: 3px solid var(--error);
-        }}
-        
-        /* Estilo para agrupar logs por categoría */
-        .category-group {{
-            margin-bottom: 25px;
-            border-left: 3px solid var(--primary-light);
-            padding-left: 15px;
-        }}
-        
-        .category-title {{
-            color: var(--primary-light);
-            font-size: 1.1em;
-            margin-bottom: 15px;
-            padding-bottom: 5px;
-            border-bottom: 1px dashed var(--border-color);
-        }}
-        
-        @media (max-width: 768px) {{
-            .info-grid {{
-                grid-template-columns: 1fr;
-            }}
-            
-            .filter-form form {{
-                flex-direction: column;
-            }}
-            
-            .related-log-header {{
-                flex-direction: column;
-                gap: 5px;
-            }}
-            
-            .log-category {{
-                max-width: 100%;
-            }}
-        }}
-        
-        .title-link {{
-            color: var(--primary-light);
-            text-decoration: none;
-            transition: color 0.3s;
-        }}
-        
-        .title-link:hover {{
-            color: var(--secondary-color);
-        }}
-        
-        /* Estilos para el indicador de actualización en tiempo real */
-        .live-indicator {{
-            display: inline-flex;
-            align-items: center;
-            margin-right: 15px;
-            background-color: rgba(255, 193, 7, 0.2);
-            color: #ffc107;
-            font-size: 0.85em;
-            padding: 5px 10px;
-            border-radius: 20px;
-            border: 1px solid rgba(255, 193, 7, 0.5);
-        }}
-        
-        #reload-counter {{
-            font-weight: bold;
-            margin: 0 3px;
-            animation: pulse 1s infinite;
-        }}
-    </style>
-    <!-- Hack para forzar estilos en selects para todos los navegadores -->
-    <style id=""fix-selects"">
-        /* Esto aplicará estilos a los selects en cualquier navegador */
-        html select, html option {{
-            background-color: #1e1e1e !important;
-            color: #ffffff !important;
-        }}
-    </style>
-</head>
-<body>
-    <!-- Script para asegurar que los selects tengan tema oscuro -->
-    <script>
-        // Este script se ejecuta inmediatamente y fuerza el tema oscuro en los selects
-        document.addEventListener('DOMContentLoaded', function() {{
-            // Una función que aplica un fondo oscuro a todos los selects y opciones
-            function applyDarkStyles() {{
-                var selects = document.querySelectorAll('select');
-                for (var i = 0; i < selects.length; i++) {{
-                    selects[i].style.backgroundColor = '#1e1e1e';
-                    selects[i].style.color = '#ffffff';
-                    
-                    var options = selects[i].querySelectorAll('option');
-                    for (var j = 0; j < options.length; j++) {{
-                        options[j].style.backgroundColor = '#1e1e1e';
-                        options[j].style.color = '#ffffff';
-                    }}
-                }}
-            }}
-            
-            // Aplicar inmediatamente
-            applyDarkStyles();
-            
-            // También aplicar cuando cambie el select (algunos navegadores resetean estilos)
-            var selects = document.querySelectorAll('select');
-            for (var i = 0; i < selects.length; i++) {{
-                selects[i].addEventListener('change', applyDarkStyles);
-                selects[i].addEventListener('focus', applyDarkStyles);
-                selects[i].addEventListener('blur', applyDarkStyles);
-            }}
-        }});
-    </script>
-";
+        return "<!DOCTYPE html><html lang='es'><head>" +
+               "<meta charset='UTF-8'>" +
+               "<meta name='viewport' content='width=device-width, initial-scale=1.0'>" +
+               "<meta name='color-scheme' content='dark'>" +
+               "<link rel='icon' href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23131726' stroke='%238b5cf6' stroke-width='3'/%3E%3Ccircle cx='20' cy='17' r='4' fill='%2322d3ee'/%3E%3Ccircle cx='11' cy='12' r='3' fill='%23c4b5fd'/%3E%3C/svg%3E\">" +
+               $"<title>{E(title)}</title>" +
+               $"<style>{HubbleAssets.Styles}</style>" +
+               "</head><body>";
     }
 
     /// <summary>
-    /// Genera el pie de página HTML.
+    /// Genera el pie de página HTML, el diálogo de atajos y los scripts del dashboard.
     /// </summary>
     /// <returns>HTML del pie de página</returns>
     private string GenerateHtmlFooter()
     {
-        return $@"
-    <footer style='text-align: center; margin-top: 40px; padding: 20px; color: var(--text-secondary);'>
-        <p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>{_version}</span></p>
-    </footer>
-</body>
-</html>";
+        return $"<footer class='app-footer'><span class='app-title'>Hubble for .NET</span><span class='app-version'>{E(_version)}</span> · Pulsa <kbd>?</kbd> para ver los atajos de teclado</footer>" +
+               "<dialog class='modal' id='shortcuts-dialog'>" +
+               $"<div class='modal-head'><span>Atajos de teclado</span><button type='button' class='btn small ghost icon' data-close title='Cerrar'>{Icon("x")}</button></div>" +
+               "<div class='modal-body'><div class='shortcuts'>" +
+               "<span><kbd>/</kbd></span><span>Buscar por URL</span>" +
+               "<span><kbd>F</kbd></span><span>Refinar los resultados de la página</span>" +
+               "<span><kbd>J</kbd> <kbd>K</kbd></span><span>Moverse entre registros</span>" +
+               "<span><kbd>Enter</kbd></span><span>Abrir el registro seleccionado</span>" +
+               "<span><kbd>C</kbd></span><span>Copiar la URL del registro seleccionado</span>" +
+               "<span><kbd>←</kbd> <kbd>→</kbd></span><span>Página anterior / siguiente</span>" +
+               "<span><kbd>L</kbd></span><span>Activar o pausar la actualización en vivo</span>" +
+               "<span><kbd>1</kbd> … <kbd>6</kbd></span><span>Cambiar de pestaña en el detalle</span>" +
+               "<span><kbd>B</kbd></span><span>Volver a la lista desde el detalle</span>" +
+               "<span><kbd>Esc</kbd></span><span>Salir del campo de búsqueda</span>" +
+               "</div></div></dialog>" +
+               $"<script>{HubbleAssets.Scripts}</script>" +
+               "</body></html>";
     }
 
     /// <summary>
@@ -1786,21 +1575,46 @@ public class HubbleController
     /// </summary>
     /// <param name="json">Cadena JSON</param>
     /// <returns>JSON formateado</returns>
-    private string FormatJson(string json)
+    private static string FormatJson(string json)
     {
-        if (string.IsNullOrEmpty(json))
+        return TryFormatJson(json, out var formatted) ? formatted : json ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Indenta un objeto o array JSON sin alterar sus valores (fechas y decimales se conservan tal cual).
+    /// </summary>
+    /// <param name="json">Texto a formatear</param>
+    /// <param name="formatted">JSON indentado, o el texto original si no es JSON</param>
+    /// <returns>true si el texto era JSON válido</returns>
+    private static bool TryFormatJson(string? json, out string formatted)
+    {
+        formatted = json ?? string.Empty;
+        var trimmed = formatted.TrimStart();
+        if (trimmed.Length == 0 || (trimmed[0] != '{' && trimmed[0] != '['))
         {
-            return string.Empty;
+            return false;
         }
 
         try
         {
-            var obj = JsonConvert.DeserializeObject(json);
-            return JsonConvert.SerializeObject(obj, Formatting.Indented);
+            using var reader = new JsonTextReader(new StringReader(formatted))
+            {
+                DateParseHandling = DateParseHandling.None,
+                FloatParseHandling = FloatParseHandling.Decimal
+            };
+            var token = JToken.ReadFrom(reader);
+            if (reader.Read())
+            {
+                // Contenido adicional después del JSON: no es un documento JSON válido
+                return false;
+            }
+
+            formatted = token.ToString(Formatting.Indented);
+            return true;
         }
-        catch
+        catch (JsonException)
         {
-            return json;
+            return false;
         }
     }
 
@@ -1836,19 +1650,9 @@ public class HubbleController
         // Generar HTML (el resto del método queda igual)
         var html = GenerateHtmlHeader("Hubble - Configuración", true);
 
-        html += "<div class='container'>";
-        html += "<div class='header'>";
-        html += "<div class='header-left'>";
-        html += GetHubbleLogo();
-        html += "<p><span class='app-title'>Hubble for .NET</span> <span class='app-version'>" + _version + "</span></p>";
-        html += "</div>";
-
-        // Botones de navegación
-        html += "<div class='header-right'>";
-        html += $"<a href='{_prefixPath}{_basePath}' class='btn secondary'>Volver a logs</a>";
-        html += LogoutButton();
-        html += "</div>";
-        html += "</div>";
+        html += TopBar("config");
+        html += "<main class='container'>";
+        html += "<div class='page-head'><div><h1 class='page-h1'>Configuración</h1><p class='page-sub'>Estadísticas de almacenamiento y opciones activas de Hubble</p></div></div>";
 
         // Contenido principal con dos columnas: estadísticas y configuración
         html += "<div class='config-container'>";
@@ -2033,14 +1837,14 @@ public class HubbleController
         html += "</div>"; // Fin de la segunda columna
         html += "</div>"; // Fin del contenedor de configuración
 
-        html += "</div>"; // Fin del contenedor principal
+        html += "</main>"; // Fin del contenedor principal
 
         // Agregar estilos CSS específicos para la página de configuración
         html += "<style>";
         html += ".config-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; }";
         html += ".config-column { flex: 1; min-width: 300px; }";
         html += ".stats-column, .config-settings-column { display: flex; flex-direction: column; gap: 20px; }";
-        html += ".stats-card { background: #1e1e1e; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); color: #ffffff; }";
+        html += ".stats-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 20px; color: var(--text); }";
         html += ".stats-card h3 { margin-top: 0; color: #bb86fc; font-size: 18px; margin-bottom: 15px; }";
         html += ".stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }";
         html += ".stat-item { display: flex; flex-direction: column; }";
@@ -2065,10 +1869,6 @@ public class HubbleController
         html += "h2 { color: #bb86fc; margin-bottom: 15px; font-size: 22px; }";
         html += "p { color: rgba(255, 255, 255, 0.8); }";
         html += "label { color: rgba(255, 255, 255, 0.8); }";
-        html += ".btn.primary { background-color: #6200ee; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }";
-        html += ".btn.secondary { background-color: transparent; color: #bb86fc; border: 1px solid #bb86fc; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }";
-        html += ".btn.primary:hover { background-color: #7a36f9; }";
-        html += ".btn.secondary:hover { background-color: rgba(187, 134, 252, 0.1); }";
         html += ".info-message { background-color: rgba(98, 0, 238, 0.1); border-left: 3px solid #6200ee; padding: 10px; margin-top: 15px; border-radius: 0 4px 4px 0; }";
         html += ".info-message p { color: rgba(255, 255, 255, 0.9); margin: 0; font-style: italic; }";
         html += ".stats-info { background-color: rgba(3, 218, 198, 0.1); border-left: 3px solid #03dac6; margin: 20px auto; max-width: 800px; }";

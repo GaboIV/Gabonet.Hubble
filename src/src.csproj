@@ -24,9 +24,10 @@
   </ItemGroup>
 
   <!-- Conditional EF Core Package References based on target framework -->
+  <!-- net6.0 pide EF Core 5.0.x como mínimo para no forzar EF 6 en consumidores que siguen en EF 5 (p. ej. Pomelo 5). Las APIs de interceptores son las mismas. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="6.0.36" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="6.0.36" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="5.0.17" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="5.0.17" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="6.0.0" />
   </ItemGroup>
