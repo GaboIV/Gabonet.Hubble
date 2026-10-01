@@ -15,10 +15,12 @@ builder.Services.AddSwaggerGen();
 // === OPCIÓN 1: Configurar Hubble usando appsettings.json (RECOMENDADO) ===
 // La configuración se carga automáticamente desde la sección "Hubble" en appsettings.json
 builder.Services.AddHubble(
-    builder.Configuration,
-    builder.Configuration.GetConnectionString("MongoConnection")!,
-    "HubbleDB"
-);
+    builder.Configuration.GetSection("Hubble"),                    // Sección "Hubble" de appsettings.json
+    options =>
+    {
+        options.ConnectionString = builder.Configuration.GetConnectionString("MongoConnection")!;
+        options.DatabaseName = "HubbleDB";
+    });
 
 // === OPCIÓN 2: Configurar Hubble manualmente (alternativa) ===
 /*
@@ -36,7 +38,6 @@ builder.Services.AddHubble(options =>
     options.IgnoreStaticFiles = true;
     options.EnableDiagnostics = true; // Habilitar en desarrollo
     options.EnableDataPrune = true;
-    options.DataPruneIntervalHours = 24;
     options.MaxLogAgeHours = 168;
 });
 */

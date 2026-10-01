@@ -29,7 +29,6 @@ Crea o actualiza tu archivo `appsettings.json` con la siguiente sección:
     ],
     "IgnoreStaticFiles": true,
     "EnableDataPrune": true,
-    "DataPruneIntervalHours": 24,
     "MaxLogAgeHours": 168,
     "TimeZoneId": "America/Mexico_City"
   }
@@ -48,10 +47,12 @@ builder.Services.AddControllers();
 
 // Configurar Hubble con autenticación desde appsettings.json
 builder.Services.AddHubble(
-    builder.Configuration,
-    builder.Configuration.GetConnectionString("MongoConnection")!,
-    "HubbleDB"
-);
+    builder.Configuration.GetSection("Hubble"),                    // Sección "Hubble" de appsettings.json
+    options =>
+    {
+        options.ConnectionString = builder.Configuration.GetConnectionString("MongoConnection")!;
+        options.DatabaseName = "HubbleDB";
+    });
 
 // Agregar logging de Hubble
 builder.Logging.AddHubbleLogging();
@@ -76,12 +77,11 @@ app.Run();
 | `BasePath` | string | Ruta base de Hubble | `"/hubble"` |
 | `ServiceName` | string | Nombre del servicio | `"HubbleService"` |
 | `EnableDiagnostics` | bool | Habilita diagnósticos | `false` |
-| `CaptureLoggerMessages` | bool | Captura logs de ILogger | `false` |
+| `CaptureLoggerMessages` | bool | Captura logs de ILogger (requiere `AddHubbleLogging()`) | `true` |
 | `CaptureHttpRequests` | bool | Captura requests HTTP | `true` |
 | `IgnorePaths` | string[] | Rutas a ignorar | `[]` |
 | `IgnoreStaticFiles` | bool | Ignora archivos estáticos | `true` |
-| `EnableDataPrune` | bool | Limpieza automática | `false` |
-| `DataPruneIntervalHours` | int | Intervalo de limpieza (horas) | `1` |
+| `EnableDataPrune` | bool | Retención automática con índice TTL de MongoDB | `false` |
 | `MaxLogAgeHours` | int | Edad máxima de logs (horas) | `24` |
 | `TimeZoneId` | string | Zona horaria | `""` (UTC) |
 
@@ -89,7 +89,7 @@ app.Run();
 
 ### 1. Autenticación por Cookie (Interfaz Web)
 
-Visita `https://tu-app/hubble` en tu navegador e ingresa las credenciales. Se creará una cookie válida por 8 horas.
+Visita `https://tu-app/hubble` en tu navegador e ingresa las credenciales. Se creará una cookie de sesión cifrada y firmada con ASP.NET Core Data Protection (`HttpOnly`, `SameSite=Strict`), válida por 8 horas. El formulario de login está protegido contra CSRF y, tras 5 intentos fallidos desde la misma IP, el acceso se bloquea 15 minutos.
 
 ### 2. Autenticación Básica HTTP (APIs)
 
@@ -146,7 +146,6 @@ var response = await client.GetAsync("https://tu-app/hubble/api/logs");
       "/api/public"
     ],
     "EnableDataPrune": true,
-    "DataPruneIntervalHours": 12,
     "MaxLogAgeHours": 72,
     "TimeZoneId": "America/Mexico_City"
   }
@@ -173,40 +172,32 @@ var response = await client.GetAsync("https://tu-app/hubble/api/logs");
 
 1. **Usa contraseñas seguras** en producción
 2. **Nunca commits credenciales** en el código fuente
-3. **Usa variables de entorno** para valores sensibles:
-
-```json
-{
-  "Hubble": {
-    "RequireAuthentication": true,
-    "Username": "${HUBBLE_USERNAME}",
-    "Password": "${HUBBLE_PASSWORD}"
-  }
-}
-```
+3. **Usa variables de entorno o un gestor de secretos** para valores sensibles. ASP.NET Core **no** expande `${VARIABLE}` dentro de `appsettings.json`; en su lugar, deja la contraseña fuera del archivo y defínela con una variable de entorno que use `__` como separador de sección (sobrescribe automáticamente `Hubble:Password`):
 
 4. **Usa HTTPS** en producción para proteger las credenciales
-5. **Limita el acceso** solo a administradores
+5. **Limita el acceso** solo a administradores con `Security.AllowedIps` (solo afecta al dashboard, no a tu aplicación)
+6. **Varias instancias**: configura un almacén compartido de claves de Data Protection para que la cookie de sesión sea válida en todas
 
 ### Variables de Entorno:
 
 ```bash
 # Linux/macOS
-export HUBBLE_USERNAME="admin"
-export HUBBLE_PASSWORD="mi-password-seguro"
+export Hubble__Username="admin"
+export Hubble__Password="mi-password-seguro"
 
-# Windows
-set HUBBLE_USERNAME=admin
-set HUBBLE_PASSWORD=mi-password-seguro
+# Windows (PowerShell)
+$env:Hubble__Username = "admin"
+$env:Hubble__Password = "mi-password-seguro"
 ```
 
 ## Troubleshooting
 
 ### Problema: No puedo acceder a la interfaz
 
-1. Verifica que `RequireAuthentication` esté en `true`
-2. Confirma que las credenciales sean correctas
-3. Revisa la consola para mensajes de Hubble
+1. Si recibes `403`, tu IP no está en `Security.AllowedIps` (detrás de un proxy, configura `UseForwardedHeaders()` antes de `UseHubble()`)
+2. Si recibes `429`, hubo demasiados intentos fallidos: espera 15 minutos
+3. Confirma que las credenciales sean correctas
+4. Si `RequireAuthentication` es `true` con usuario o contraseña vacíos, la aplicación no arranca: configura ambas credenciales
 
 ### Problema: API devuelve 401
 

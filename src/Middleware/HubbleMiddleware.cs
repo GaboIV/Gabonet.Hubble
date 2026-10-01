@@ -1,11 +1,11 @@
 namespace Gabonet.Hubble.Middleware;
 
 using Gabonet.Hubble.Extensions;
-using Gabonet.Hubble.Interfaces;
 using Gabonet.Hubble.Models;
+using Gabonet.Hubble.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
+using MongoDB.Bson;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -17,33 +17,28 @@ using System.Threading.Tasks;
 
 /// <summary>
 /// Middleware para capturar y registrar solicitudes HTTP, respuestas y consultas a bases de datos.
+/// Los logs se encolan en memoria y se guardan en segundo plano: la solicitud nunca espera a MongoDB.
 /// </summary>
 public class HubbleMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IServiceProvider _serviceProvider;
     private readonly HubbleOptions _options;
-    private readonly HubbleDataPruneManager _pruneManager;
+    private readonly HubbleLogQueue _logQueue;
 
     /// <summary>
     /// Constructor del middleware de Hubble.
     /// </summary>
     /// <param name="next">Siguiente middleware en la cadena</param>
-    /// <param name="httpContextAccessor">Acceso al contexto HTTP</param>
-    /// <param name="serviceProvider">Proveedor de servicios</param>
     /// <param name="options">Opciones de configuración</param>
+    /// <param name="logQueue">Cola de logs pendientes de guardar</param>
     public HubbleMiddleware(
         RequestDelegate next,
-        IHttpContextAccessor httpContextAccessor,
-        IServiceProvider serviceProvider,
-        HubbleOptions options)
+        HubbleOptions options,
+        HubbleLogQueue logQueue)
     {
         _next = next;
-        _httpContextAccessor = httpContextAccessor;
-        _serviceProvider = serviceProvider;
         _options = options;
-        _pruneManager = new HubbleDataPruneManager(options);
+        _logQueue = logQueue;
 
         // Mostrar información de inicialización
         Console.WriteLine($"[Hubble] Servicio inicializado para: {options.ServiceName}");
@@ -51,8 +46,7 @@ public class HubbleMiddleware
 
         if (options.EnableDataPrune)
         {
-            Console.WriteLine($"[Hubble] Intervalo de limpieza: {options.DataPruneIntervalHours} hora(s)");
-            Console.WriteLine($"[Hubble] Se conservarán logs de las últimas {options.MaxLogAgeHours} hora(s)");
+            Console.WriteLine($"[Hubble] Se conservarán logs de las últimas {options.MaxLogAgeHours} hora(s) (índice TTL de MongoDB)");
         }
     }
 
@@ -63,217 +57,108 @@ public class HubbleMiddleware
     /// <returns>Tarea asíncrona</returns>
     public async Task InvokeAsync(HttpContext context)
     {
-        // Verificar si la IP del cliente está permitida
-        if (!IsIpAllowed(context))
-        {
-            context.Response.StatusCode = 403; // Forbidden
-            await context.Response.WriteAsync("Access denied: IP not allowed");
-            return;
-        }
-
-        // Verificar si la ruta actual debe ser ignorada
+        // Verificar si la ruta actual debe ser ignorada.
+        // Nota: el filtro de IPs (Security.AllowedIps) solo se aplica al dashboard en HubbleUIMiddleware;
+        // este middleware nunca bloquea solicitudes de la aplicación.
         var path = context.Request.Path.Value?.ToLower();
-        if (ShouldIgnoreRequest(context, path))
+        if (!_options.CaptureHttpRequests || ShouldIgnoreRequest(context, path))
         {
             await _next(context);
             return;
         }
 
-        var stopwatch = new Stopwatch();
-        stopwatch.Start();
+        var stopwatch = Stopwatch.StartNew();
 
-        // Capturar la solicitud
-        var request = await FormatRequest(context.Request);
-        var originalBodyStream = context.Response.Body;
-        GeneralLog? requestLog = null;
-
-        using (var responseBody = new MemoryStream())
+        // El Id se genera en memoria, sin consultar MongoDB: los logs de ILogger pueden asociarse
+        // a esta solicitud desde el primer momento
+        var requestLog = new GeneralLog
         {
-            context.Response.Body = responseBody;
+            Id = ObjectId.GenerateNewId().ToString(),
+            ServiceName = _options.ServiceName,
+            HttpUrl = context.Request.Path,
+            QueryParams = context.Request.QueryString.Value ?? string.Empty,
+            Method = context.Request.Method,
+            RequestData = await FormatRequest(context.Request),
+            RequestHeaders = FormatHeaders(context.Request.Headers),
+            IpAddress = HubbleLogEntryFactory.GetClientIpAddress(context),
+            Timestamp = DateTime.UtcNow
+        };
+        context.Items[HubbleLogEntryFactory.RequestLogItemKey] = requestLog;
 
-            try
+        var originalBodyStream = context.Response.Body;
+        using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+        var failed = false;
+
+        try
+        {
+            // Ejecutar el siguiente middleware en la cadena
+            await _next(context);
+
+            requestLog.StatusCode = context.Response.StatusCode;
+            requestLog.ResponseData = await FormatResponse(context.Response);
+        }
+        catch (Exception ex)
+        {
+            failed = true;
+            requestLog.StatusCode = context.Response.HasStarted ? context.Response.StatusCode : StatusCodes.Status500InternalServerError;
+            requestLog.IsError = true;
+            requestLog.ErrorMessage = ex.Message;
+            requestLog.StackTrace = ex.StackTrace;
+
+            if (_options.EnableDiagnostics)
             {
-                // Registrar el log al principio y guardarlo en el contexto para que
-                // los loggers puedan asociarse a él
-                try
-                {
-                    using (var scope = _serviceProvider.CreateScope())
-                    {
-                        var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
-
-                        // Crear un log inicial que se actualizará más tarde
-                        var initialLog = new GeneralLog
-                        {
-                            ServiceName = _options.ServiceName,
-                            HttpUrl = context.Request.Path,
-                            QueryParams = context.Request.QueryString.Value ?? string.Empty,
-                            Method = context.Request.Method,
-                            RequestData = request,
-                            RequestHeaders = FormatHeaders(context.Request.Headers),
-                            Timestamp = DateTime.UtcNow
-                        };
-
-                        // Guardar el log en la base de datos para obtener su ID
-                        await hubbleService.CreateLogAsync(initialLog);
-
-                        // Guardar el log en el contexto HTTP
-                        context.Items["Hubble_RequestLog"] = initialLog;
-                        requestLog = initialLog;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error al crear log inicial: {ex.Message}");
-                }
-
-                // Ejecutar el siguiente middleware en la cadena
-                await _next(context);
-
-                // Capturar la respuesta
-                var response = await FormatResponse(context.Response);
-
-                // Obtener las consultas a bases de datos capturadas
-                var databaseQueries = context.GetDatabaseQueries();
-
-                try
-                {
-                    using (var scope = _serviceProvider.CreateScope())
-                    {
-                        var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
-
-                        stopwatch.Stop();
-                        var executionTime = stopwatch.ElapsedMilliseconds;
-
-                        // Actualizar el log con la información completa
-                        if (requestLog != null && !string.IsNullOrEmpty(requestLog.Id))
-                        {
-                            // Actualizar el log existente
-                            requestLog.ResponseData = response;
-                            requestLog.StatusCode = context.Response.StatusCode;
-                            requestLog.ExecutionTime = executionTime;
-                            requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
-                            requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-
-                            string controllerName = "Unknown";
-                            string actionName = "Unknown";
-
-                            // Obtener información de controlador y acción si está disponible
-                            var routeData = context.GetRouteData();
-                            if (routeData != null)
-                            {
-                                var controllerValue = routeData.Values["controller"];
-                                var actionValue = routeData.Values["action"];
-
-                                if (controllerValue != null)
-                                {
-                                    controllerName = controllerValue.ToString() ?? "Unknown";
-                                }
-
-                                if (actionValue != null)
-                                {
-                                    actionName = actionValue.ToString() ?? "Unknown";
-                                }
-                            }
-
-                            requestLog.ControllerName = controllerName;
-                            requestLog.ActionName = actionName;
-
-                            await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
-                        }
-                        else
-                        {
-                            // Si por alguna razón no existe el log inicial, crear uno nuevo
-                            await LogGeneralAsync(
-                                context,
-                                hubbleService,
-                                request,
-                                response,
-                                false,
-                                null,
-                                null,
-                                databaseQueries,
-                                executionTime);
-                        }
-
-                        // Ejecutar la limpieza de datos históricos si está habilitada
-                        await _pruneManager.TryPruneDataAsync(hubbleService);
-                    }
-                }
-                catch (Exception serviceEx)
-                {
-                    // No propagamos la excepción para que no afecte la respuesta al cliente
-                    if (_options.EnableDiagnostics)
-                    {
-                        Console.WriteLine($"HubbleMiddleware: Error al obtener HubbleService: {serviceEx.Message}");
-                    }
-                }
+                Console.WriteLine($"HubbleMiddleware: Error: {ex.Message}");
+                Console.WriteLine($"HubbleMiddleware: StackTrace: {ex.StackTrace}");
             }
-            catch (Exception ex)
-            {
-                if (_options.EnableDiagnostics)
-                {
-                    Console.WriteLine($"HubbleMiddleware: Error: {ex.Message}");
-                    Console.WriteLine($"HubbleMiddleware: StackTrace: {ex.StackTrace}");
-                }
 
-                try
-                {
-                    using (var scope = _serviceProvider.CreateScope())
-                    {
-                        var hubbleService = scope.ServiceProvider.GetRequiredService<IHubbleService>();
-                        var databaseQueries = context.GetDatabaseQueries();
+            throw; // Propagamos la excepción original
+        }
+        finally
+        {
+            stopwatch.Stop();
+            CompleteAndEnqueue(context, requestLog, stopwatch.ElapsedMilliseconds);
 
-                        stopwatch.Stop();
-                        var executionTime = stopwatch.ElapsedMilliseconds;
+            // Restaurar el stream original para que los middlewares externos (por ejemplo, un manejador
+            // de excepciones) escriban en la respuesta real y no en el buffer ya liberado
+            context.Response.Body = originalBodyStream;
 
-                        // Registrar el log de error
-                        if (requestLog != null && !string.IsNullOrEmpty(requestLog.Id))
-                        {
-                            // Actualizar el log existente con la información de error
-                            requestLog.StatusCode = context.Response.StatusCode > 0 ? context.Response.StatusCode : 500;
-                            requestLog.IsError = true;
-                            requestLog.ErrorMessage = ex.Message;
-                            requestLog.StackTrace = ex.StackTrace;
-                            requestLog.ExecutionTime = executionTime;
-                            requestLog.DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList();
-                            requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
-
-                            await hubbleService.UpdateLogAsync(requestLog.Id, requestLog);
-                        }
-                        else
-                        {
-                            // Si no existe el log inicial, crear uno nuevo
-                            await LogGeneralAsync(
-                                context,
-                                hubbleService,
-                                request,
-                                null,
-                                true,
-                                ex.Message,
-                                ex.StackTrace,
-                                databaseQueries,
-                                executionTime);
-                        }
-
-                        // Ejecutar la limpieza de datos históricos si está habilitada
-                        await _pruneManager.TryPruneDataAsync(hubbleService);
-                    }
-                }
-                catch (Exception serviceEx)
-                {
-                    // No propagamos la excepción para que no afecte la respuesta al cliente
-                    if (_options.EnableDiagnostics)
-                    {
-                        Console.WriteLine($"HubbleMiddleware: Error al obtener HubbleService para error: {serviceEx.Message}");
-                    }
-                }
-
-                throw; // Propagamos la excepción original
-            }
-            finally
+            if (!failed)
             {
                 // Copiar la respuesta al stream original
+                responseBody.Position = 0;
                 await responseBody.CopyToAsync(originalBodyStream);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Completa el log con los datos finales de la solicitud y lo encola. Nunca lanza excepciones.
+    /// </summary>
+    private void CompleteAndEnqueue(HttpContext context, GeneralLog requestLog, long executionTime)
+    {
+        try
+        {
+            requestLog.ExecutionTime = executionTime;
+            requestLog.QueryParams = context.Request.QueryString.Value ?? string.Empty;
+            requestLog.DatabaseQueries = context.GetDatabaseQueries().Select(q => q.ToDatabaseQuery()).ToList();
+
+            // Obtener información de controlador y acción si está disponible
+            var routeValues = context.GetRouteData()?.Values;
+            requestLog.ControllerName = routeValues?["controller"]?.ToString() ?? "Unknown";
+            requestLog.ActionName = routeValues?["action"]?.ToString() ?? "Unknown";
+
+            if (!_logQueue.TryEnqueue(requestLog) && _options.EnableDiagnostics)
+            {
+                Console.WriteLine("HubbleMiddleware: cola de logs llena, se descartó el log de la solicitud");
+            }
+        }
+        catch (Exception ex)
+        {
+            // No propagamos la excepción para que no afecte la respuesta al cliente
+            if (_options.EnableDiagnostics)
+            {
+                Console.WriteLine($"HubbleMiddleware: Error al registrar la solicitud: {ex.Message}");
             }
         }
     }
@@ -292,8 +177,10 @@ public class HubbleMiddleware
             }
         }
 
-        // Ignorar rutas de Hubble
-        if (path != null && (path.StartsWith(_options.BasePath.ToLower()) || path.StartsWith("/api/hubble")))
+        // Ignorar rutas de Hubble (comparación por segmentos: "/hubble" no coincide con "/hubblefoo")
+        var hubbleBasePath = "/" + (_options.BasePath ?? string.Empty).Trim().Trim('/');
+        if (context.Request.Path.StartsWithSegments(hubbleBasePath, StringComparison.OrdinalIgnoreCase) ||
+            context.Request.Path.StartsWithSegments("/api/hubble", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -311,163 +198,6 @@ public class HubbleMiddleware
         }
 
         return false;
-    }
-
-    private bool IsIpAllowed(HttpContext context)
-    {
-        // Si no hay IPs permitidas configuradas, permitir todas
-        if (_options.Security.AllowedIps == null || !_options.Security.AllowedIps.Any())
-        {
-            return true;
-        }
-
-        // Si se permite explícitamente el comodín "*", permitir todas
-        if (_options.Security.AllowedIps.Contains("*"))
-        {
-            return true;
-        }
-
-        var clientIp = context.Connection.RemoteIpAddress?.ToString();
-
-        // Si no se puede obtener la IP, denegar
-        if (string.IsNullOrEmpty(clientIp))
-        {
-            return false;
-        }
-
-        // Normalizar localhost
-        if (clientIp == "::1")
-        {
-            clientIp = "127.0.0.1";
-        }
-
-        // Verificar si la IP está en la lista permitida
-        foreach (var allowedIp in _options.Security.AllowedIps)
-        {
-            if (string.IsNullOrWhiteSpace(allowedIp)) continue;
-
-            if (allowedIp.Contains("/"))
-            {
-                // Manejo básico de CIDR (puede mejorarse con una librería dedicada)
-                var parts = allowedIp.Split('/');
-                if (parts.Length == 2 && int.TryParse(parts[1], out var subnet))
-                {
-                    if (IsIpInSubnet(clientIp, parts[0], subnet))
-                    {
-                        return true;
-                    }
-                }
-            }
-            else if (clientIp == allowedIp)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool IsIpInSubnet(string ip, string network, int subnet)
-    {
-        // Implementación simplificada para IPv4
-        // Para una implementación completa, considerar usar una librería como IPNetwork
-        try
-        {
-            var ipParts = ip.Split('.').Select(int.Parse).ToArray();
-            var networkParts = network.Split('.').Select(int.Parse).ToArray();
-
-            if (ipParts.Length != 4 || networkParts.Length != 4)
-            {
-                return false;
-            }
-
-            var mask = ~(0xFFFFFFFF >> subnet);
-            var ipInt = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
-            var networkInt = (networkParts[0] << 24) | (networkParts[1] << 16) | (networkParts[2] << 8) | networkParts[3];
-
-            return (ipInt & mask) == (networkInt & mask);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private async Task LogGeneralAsync(
-        HttpContext context,
-        IHubbleService hubbleService,
-        string request,
-        string? response,
-        bool isError,
-        string? errorMessage,
-        string? stackTrace,
-        List<DatabaseQueryLog> databaseQueries,
-        long executionTime)
-    {
-        // Si no está habilitada la captura de logs HTTP, salir
-        if (!_options.CaptureHttpRequests)
-        {
-            return;
-        }
-
-        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
-
-        if (ipAddress == "::1" || ipAddress == "127.0.0.1")
-        {
-            ipAddress = "Localhost";
-        }
-        else if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = "IP not available";
-        }
-
-        string controllerName = "Unknown";
-        string actionName = "Unknown";
-
-        // Obtener información de controlador y acción si está disponible
-        var routeData = context.GetRouteData();
-        if (routeData != null)
-        {
-            var controllerValue = routeData.Values["controller"];
-            var actionValue = routeData.Values["action"];
-
-            if (controllerValue != null)
-            {
-                controllerName = controllerValue.ToString() ?? "Unknown";
-            }
-
-            if (actionValue != null)
-            {
-                actionName = actionValue.ToString() ?? "Unknown";
-            }
-        }
-
-        var log = new GeneralLog
-        {
-            ServiceName = _options.ServiceName,
-            ControllerName = controllerName,
-            ActionName = actionName,
-            HttpUrl = context.Request.Path,
-            QueryParams = context.Request.QueryString.Value ?? string.Empty,
-            Method = context.Request.Method,
-            RequestData = request,
-            ResponseData = response,
-            RequestHeaders = FormatHeaders(context.Request.Headers),
-            StatusCode = context.Response.StatusCode,
-            IsError = isError,
-            ErrorMessage = errorMessage,
-            StackTrace = stackTrace,
-            IpAddress = ipAddress,
-            Timestamp = DateTime.UtcNow,
-            ExecutionTime = executionTime,
-            DatabaseQueries = databaseQueries.Select(q => q.ToDatabaseQuery()).ToList()
-        };
-
-        // Guardar el log en la base de datos
-        await hubbleService.CreateLogAsync(log);
-
-        // Guardar el log en el contexto HTTP para que los logs de ILogger puedan referenciarlo
-        context.Items["Hubble_RequestLog"] = log;
     }
 
     private async Task<string> FormatRequest(HttpRequest request)
@@ -589,138 +319,4 @@ public class HubbleMiddleware
             }
         }
     }
-}
-
-/// <summary>
-/// Opciones de configuración para el middleware de Hubble.
-/// </summary>
-public class HubbleOptions
-{
-    /// <summary>
-    /// Nombre del servicio que se mostrará en los logs.
-    /// </summary>
-    public string ServiceName { get; set; } = "HubbleService";
-
-    /// <summary>
-    /// Lista de rutas que deben ser ignoradas por el middleware.
-    /// </summary>
-    public List<string> IgnorePaths { get; set; } = new List<string>();
-
-    /// <summary>
-    /// Indica si se deben ignorar las solicitudes a archivos estáticos.
-    /// </summary>
-    public bool IgnoreStaticFiles { get; set; } = true;
-
-    /// <summary>
-    /// Indica si se deben mostrar mensajes de diagnóstico en la consola.
-    /// </summary>
-    public bool EnableDiagnostics { get; set; } = false;
-
-    /// <summary>
-    /// Indica si se deben capturar los mensajes de ILogger.
-    /// </summary>
-    public bool CaptureLoggerMessages { get; set; } = false;
-
-    /// <summary>
-    /// Indica si se deben capturar las solicitudes HTTP.
-    /// </summary>
-    public bool CaptureHttpRequests { get; set; } = true;
-
-    /// <summary>
-    /// Indica si se debe requerir autenticación para acceder a la interfaz de Hubble.
-    /// </summary>
-    public bool RequireAuthentication { get; set; } = false;
-
-    /// <summary>
-    /// Nombre de usuario para la autenticación (si RequireAuthentication es true).
-    /// </summary>
-    public string Username { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Contraseña para la autenticación (si RequireAuthentication es true).
-    /// </summary>
-    public string Password { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Ruta base para acceder a la interfaz de Hubble. Por defecto es "/hubble".
-    /// </summary>
-    public string BasePath { get; set; } = "/hubble";
-
-    /// <summary>
-    /// Prefijo de ruta para las rutas de Hubble. Por defecto es string.Empty.
-    /// </summary>
-    public string PrefixPath { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Indica si se deben destacar los nuevos servicios que se van agregando en tiempo real.
-    /// </summary>
-    public bool HighlightNewServices { get; set; } = false;
-
-    /// <summary>
-    /// Duración en segundos que los nuevos servicios permanecerán destacados. Por defecto es 5 segundos.
-    /// </summary>
-    public int HighlightDurationSeconds { get; set; } = 5;
-
-    /// <summary>
-    /// Activa o desactiva el sistema de limpieza automática de logs antiguos.
-    /// </summary>
-    public bool EnableDataPrune { get; set; } = false;
-
-    /// <summary>
-    /// Intervalo en horas entre cada ejecución del proceso de limpieza de logs.
-    /// </summary>
-    public int DataPruneIntervalHours { get; set; } = 1;
-
-    /// <summary>
-    /// Edad máxima en horas que se conservarán los logs antes de ser eliminados.
-    /// </summary>
-    public int MaxLogAgeHours { get; set; } = 24;
-
-    /// <summary>
-    /// ID de la zona horaria para mostrar las fechas. Si está vacío, se usará UTC.
-    /// </summary>
-    public string TimeZoneId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Configuración de seguridad para enmascaramiento de datos sensibles
-    /// </summary>
-    public SecurityConfiguration Security { get; set; } = new SecurityConfiguration();
-
-    /// <summary>
-    /// Indica si se permite eliminar todos los logs desde la interfaz de usuario.
-    /// </summary>
-    public bool AllowDeleteAll { get; set; } = true;
-}
-
-/// <summary>
-/// Configuración de seguridad para Hubble
-/// </summary>
-public class SecurityConfiguration
-{
-    /// <summary>
-    /// Claves que activan el enmascaramiento en el JSON body de las solicitudes (request) y respuestas (response).
-    /// </summary>
-    public List<string> MaskBodyProperties { get; set; } = new List<string> { "password", "token", "cuentaOrigen", "tarjeta", "cvv" };
-
-    /// <summary>
-    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las solicitudes (request).
-    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de solicitudes.
-    /// </summary>
-    public List<string> MaskRequestBodyProperties { get; set; } = new List<string>();
-
-    /// <summary>
-    /// Claves adicionales que activan el enmascaramiento específicamente en el JSON body de las respuestas (response).
-    /// Estas se combinan con MaskBodyProperties para el enmascaramiento de respuestas.
-    /// </summary>
-    public List<string> MaskResponseBodyProperties { get; set; } = new List<string>();
-
-    /// <summary>
-    /// Headers que nunca se mostrarán completos
-    /// </summary>
-    public List<string> MaskHeaders { get; set; } = new List<string> { "Authorization", "X-Api-Key", "Cookie" };
-
-    /// <summary>
-    /// Solo permitir acceso desde estas IPs (VPN/Oficina)
-    /// </summary>
-    public List<string> AllowedIps { get; set; } = new List<string>();
 }

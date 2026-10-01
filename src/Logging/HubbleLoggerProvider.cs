@@ -1,47 +1,47 @@
 namespace Gabonet.Hubble.Logging;
 
-using Gabonet.Hubble.Interfaces;
+using Gabonet.Hubble.Middleware;
+using Gabonet.Hubble.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
 
 /// <summary>
 /// Proveedor de logs personalizado para integrar ILogger con Hubble.
+/// Los logs se encolan en memoria y se guardan en segundo plano: escribir un log nunca espera a MongoDB.
 /// </summary>
 public class HubbleLoggerProvider : ILoggerProvider
 {
-    private readonly Func<IHubbleService> _hubbleServiceFactory;
+    private readonly HubbleLogQueue _queue;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly HubbleOptions _options;
     private readonly LogLevel _minimumLevel;
 
     /// <summary>
     /// Constructor del proveedor de logs.
     /// </summary>
-    /// <param name="hubbleService">Servicio de Hubble</param>
+    /// <param name="queue">Cola de logs pendientes de guardar</param>
+    /// <param name="httpContextAccessor">Acceso al contexto HTTP para asociar los logs a la solicitud en curso</param>
+    /// <param name="options">Opciones de Hubble</param>
     /// <param name="minimumLevel">Nivel mínimo de log a capturar</param>
-    public HubbleLoggerProvider(IHubbleService hubbleService, LogLevel minimumLevel = LogLevel.Information)
-        : this(() => hubbleService, minimumLevel)
+    public HubbleLoggerProvider(
+        HubbleLogQueue queue,
+        IHttpContextAccessor httpContextAccessor,
+        HubbleOptions options,
+        LogLevel minimumLevel = LogLevel.Information)
     {
-    }
-
-    /// <summary>
-    /// Constructor del proveedor de logs con factory para resolver IHubbleService en el scope correcto.
-    /// </summary>
-    /// <param name="hubbleServiceFactory">Factory para obtener el servicio de Hubble</param>
-    /// <param name="minimumLevel">Nivel mínimo de log a capturar</param>
-    public HubbleLoggerProvider(Func<IHubbleService> hubbleServiceFactory, LogLevel minimumLevel = LogLevel.Information)
-    {
-        _hubbleServiceFactory = hubbleServiceFactory;
+        _queue = queue;
+        _httpContextAccessor = httpContextAccessor;
+        _options = options;
         _minimumLevel = minimumLevel;
     }
 
     /// <inheritdoc />
     public ILogger CreateLogger(string categoryName)
     {
-        return new HubbleLogger(categoryName, _hubbleServiceFactory, _minimumLevel);
+        return new HubbleLogger(categoryName, _queue, _httpContextAccessor, _options, _minimumLevel);
     }
 
     /// <inheritdoc />
@@ -51,17 +51,35 @@ public class HubbleLoggerProvider : ILoggerProvider
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Logger que encola en Hubble los mensajes de una categoría.
+    /// </summary>
     public class HubbleLogger : ILogger
     {
         private readonly string _categoryName;
-        private readonly Func<IHubbleService> _hubbleServiceFactory;
+        private readonly HubbleLogQueue _queue;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly HubbleOptions _options;
         private readonly LogLevel _minimumLevel;
+        private readonly bool _isHubbleCategory;
 
-        public HubbleLogger(string categoryName, Func<IHubbleService> hubbleServiceFactory, LogLevel minimumLevel)
+        /// <summary>
+        /// Constructor del logger.
+        /// </summary>
+        public HubbleLogger(
+            string categoryName,
+            HubbleLogQueue queue,
+            IHttpContextAccessor httpContextAccessor,
+            HubbleOptions options,
+            LogLevel minimumLevel)
         {
             _categoryName = categoryName;
-            _hubbleServiceFactory = hubbleServiceFactory;
+            _queue = queue;
+            _httpContextAccessor = httpContextAccessor;
+            _options = options;
             _minimumLevel = minimumLevel;
+            // Los logs internos de Hubble no se capturan: evita bucles cuando MongoDB falla
+            _isHubbleCategory = categoryName.StartsWith("Gabonet.Hubble", StringComparison.Ordinal);
         }
 
         public IDisposable BeginScope<TState>(TState state)
@@ -71,7 +89,10 @@ public class HubbleLoggerProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel logLevel)
         {
-            return logLevel >= _minimumLevel;
+            return _options.CaptureLoggerMessages &&
+                   !_isHubbleCategory &&
+                   logLevel != LogLevel.None &&
+                   logLevel >= _minimumLevel;
         }
 
         // Implementación requerida por la interfaz ILogger
@@ -98,11 +119,7 @@ public class HubbleLoggerProvider : ILoggerProvider
                 fullMessage = $"{message} (File: {sourceInfo})";
             }
 
-            // Obtenemos la instancia del servicio cuando se necesita
-            var hubbleService = _hubbleServiceFactory();
-
-            // Ejecutar de forma asíncrona pero sin esperar el resultado
-            Task.Run(() => hubbleService.LogApplicationLogAsync(_categoryName, logLevel, fullMessage, exception));
+            Enqueue(logLevel, fullMessage, exception);
         }
 
         // Método adicional que permite especificar archivo y línea
@@ -138,11 +155,31 @@ public class HubbleLoggerProvider : ILoggerProvider
                 fullMessage = $"{message} (Method: {methodName})";
             }
 
-            // Obtenemos la instancia del servicio cuando se necesita
-            var hubbleService = _hubbleServiceFactory();
+            Enqueue(logLevel, fullMessage, exception);
+        }
 
-            // Ejecutar de forma asíncrona pero sin esperar el resultado
-            Task.Run(() => hubbleService.LogApplicationLogAsync(_categoryName, logLevel, fullMessage, exception));
+        /// <summary>
+        /// Construye la entrada en el hilo que escribe el log (donde el HttpContext es el de la solicitud en curso)
+        /// y la encola sin bloquear. Si la cola está llena, el log se descarta.
+        /// </summary>
+        private void Enqueue(LogLevel logLevel, string message, Exception? exception)
+        {
+            try
+            {
+                var entry = HubbleLogEntryFactory.CreateApplicationLog(
+                    _options.ServiceName,
+                    _categoryName,
+                    logLevel,
+                    message,
+                    exception,
+                    _httpContextAccessor.HttpContext);
+
+                _queue.TryEnqueue(entry);
+            }
+            catch
+            {
+                // Registrar un log nunca debe hacer fallar a la aplicación
+            }
         }
 
         /// <summary>

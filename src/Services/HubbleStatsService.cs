@@ -45,9 +45,9 @@ public class HubbleStatsService : IHubbleStatsService
         
         _options = options;
         _logger = logger;
-        
-        // Asegurar que exista la configuración inicial
-        EnsureInitialConfigurationAsync().GetAwaiter().GetResult();
+
+        // Sin acceso a MongoDB en el constructor: la configuración inicial se crea bajo demanda
+        // en GetSystemConfigurationAsync. Resolver este servicio nunca bloquea ni falla si MongoDB está caído.
     }
 
     /// <inheritdoc />
@@ -225,7 +225,7 @@ public class HubbleStatsService : IHubbleStatsService
                     CaptureLoggerMessages = _options.CaptureLoggerMessages,
                     CaptureHttpRequests = true,
                     IgnorePaths = _options.IgnorePaths,
-                    MinimumLogLevel = "Information",
+                    MinimumLogLevel = _options.MinimumLogLevel.ToString(),
                     SystemInfo = new SystemInfo
                     {
                         Version = GetType().Assembly.GetName().Version?.ToString() ?? "0.2.9.0",

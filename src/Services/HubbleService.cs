@@ -8,6 +8,7 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 /// <summary>
@@ -95,8 +96,8 @@ public class HubbleService : IHubbleService
                 if (!string.IsNullOrWhiteSpace(word))
                 {
                     // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
-                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new MongoDB.Bson.BsonRegularExpression(word, "i"));
-                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new MongoDB.Bson.BsonRegularExpression(word, "i"));
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new MongoDB.Bson.BsonRegularExpression(Regex.Escape(word), "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new MongoDB.Bson.BsonRegularExpression(Regex.Escape(word), "i"));
                     filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }
@@ -197,131 +198,21 @@ public class HubbleService : IHubbleService
     /// <returns>Dirección IP del cliente</returns>
     private string GetClientIpAddress()
     {
-        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
-        
-        if (ipAddress == "::1" || ipAddress == "127.0.0.1")
-        {
-            ipAddress = "Localhost";
-        }
-        else if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = "IP not available";
-        }
-
-        return ipAddress;
+        return HubbleLogEntryFactory.GetClientIpAddress(_httpContextAccessor.HttpContext);
     }
 
     /// <inheritdoc />
     public async Task LogApplicationLogAsync(string category, LogLevel logLevel, string message, Exception? exception = null)
     {
-        var httpContext = _httpContextAccessor.HttpContext;
-        
-        // Extraer información de archivo, línea y método si está presente en el mensaje
-        string sourceInfo = "";
-        string cleanMessage = message;
-        
-        // Buscar diferentes patrones de información de origen en el mensaje
-        // 1. Patrón con archivo, línea y método
-        var fileLineMethodMatch = System.Text.RegularExpressions.Regex.Match(
-            message, 
-            @"\(File: ([^,]+), Line: (\d+), Method: ([^\)]+)\)$");
-            
-        // 2. Patrón solo con archivo y línea
-        var fileLineMatch = System.Text.RegularExpressions.Regex.Match(
-            message, 
-            @"\(File: ([^,]+), Line: (\d+)\)$");
-            
-        // 3. Patrón solo con método
-        var methodMatch = System.Text.RegularExpressions.Regex.Match(
-            message, 
-            @"\(File: Method: ([^\)]+)\)$");
-        
-        if (fileLineMethodMatch.Success)
-        {
-            // Extraer la información completa
-            string fileName = fileLineMethodMatch.Groups[1].Value;
-            string lineNumber = fileLineMethodMatch.Groups[2].Value;
-            string methodName = fileLineMethodMatch.Groups[3].Value;
-            sourceInfo = $"{fileName}:{lineNumber} → {methodName}";
-            
-            // Quitar esta parte del mensaje principal para que quede más limpio
-            cleanMessage = message.Substring(0, fileLineMethodMatch.Index).Trim();
-        }
-        else if (fileLineMatch.Success)
-        {
-            // Extraer la información de archivo y línea
-            string fileName = fileLineMatch.Groups[1].Value;
-            string lineNumber = fileLineMatch.Groups[2].Value;
-            sourceInfo = $"{fileName}:{lineNumber}";
-            
-            // Quitar esta parte del mensaje principal para que quede más limpio
-            cleanMessage = message.Substring(0, fileLineMatch.Index).Trim();
-        }
-        else if (methodMatch.Success)
-        {
-            // Extraer solo la información del método
-            string methodName = methodMatch.Groups[1].Value;
-            sourceInfo = methodName;
-            
-            // Quitar esta parte del mensaje principal para que quede más limpio
-            cleanMessage = message.Substring(0, methodMatch.Index).Trim();
-        }
-        
-        // Si hay un contexto HTTP activo, intentamos asociar este log a la solicitud HTTP
-        if (httpContext != null && httpContext.Items.ContainsKey("Hubble_RequestLog"))
-        {
-            // Obtenemos el ID del log de la solicitud si existe
-            if (httpContext.Items["Hubble_RequestLog"] is GeneralLog requestLog)
-            {                
-                // Creamos un log de aplicación que será registrado separadamente
-                // pero con una referencia al ID de la solicitud HTTP
-                var logEntry = new GeneralLog
-                {
-                    ServiceName = _serviceName,
-                    ControllerName = "ApplicationLogger",
-                    // Incluir la información de origen junto al nivel de log si está disponible
-                    ActionName = sourceInfo.Length > 0 ? $"{logLevel} [{sourceInfo}]" : logLevel.ToString(),
-                    HttpUrl = httpContext.Request.Path,
-                    Method = httpContext.Request.Method,
-                    RequestData = category,
-                    ResponseData = cleanMessage,
-                    StatusCode = logLevel >= LogLevel.Error ? 500 : 200,
-                    IsError = logLevel >= LogLevel.Error,
-                    ErrorMessage = exception?.Message,
-                    StackTrace = exception?.StackTrace,
-                    IpAddress = GetClientIpAddress(),
-                    Timestamp = DateTime.UtcNow,
-                    ExecutionTime = 0,
-                    RelatedRequestId = requestLog.Id
-                };
+        var logEntry = HubbleLogEntryFactory.CreateApplicationLog(
+            _serviceName,
+            category,
+            logLevel,
+            message,
+            exception,
+            _httpContextAccessor.HttpContext);
 
-                await _logsCollection.InsertOneAsync(logEntry);
-                return;
-            }
-        }
-        
-        // Si no hay un contexto HTTP o no tiene un log de solicitud asociado,
-        // registramos un log independiente como antes
-        var standAloneLogEntry = new GeneralLog
-        {
-            ServiceName = _serviceName,
-            ControllerName = "ApplicationLogger",
-            // Incluir la información de origen junto al nivel de log si está disponible
-            ActionName = sourceInfo.Length > 0 ? $"{logLevel} [{sourceInfo}]" : logLevel.ToString(),
-            HttpUrl = httpContext?.Request.Path.ToString() ?? "No URL available",
-            Method = httpContext?.Request.Method.ToString() ?? "No Method",
-            RequestData = category,
-            ResponseData = cleanMessage,
-            StatusCode = logLevel >= LogLevel.Error ? 500 : 200,
-            IsError = logLevel >= LogLevel.Error,
-            ErrorMessage = exception?.Message,
-            StackTrace = exception?.StackTrace,
-            IpAddress = GetClientIpAddress(),
-            Timestamp = DateTime.UtcNow,
-            ExecutionTime = 0
-        };
-
-        await _logsCollection.InsertOneAsync(standAloneLogEntry);
+        await _logsCollection.InsertOneAsync(logEntry);
     }
     
     /// <inheritdoc />
@@ -374,8 +265,8 @@ public class HubbleService : IHubbleService
                 if (!string.IsNullOrWhiteSpace(word))
                 {
                     // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
-                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
-                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(word, "i"));
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(Regex.Escape(word), "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(Regex.Escape(word), "i"));
                     filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }
@@ -432,8 +323,8 @@ public class HubbleService : IHubbleService
                 if (!string.IsNullOrWhiteSpace(word))
                 {
                     // Crear un filtro OR para buscar en la URL o en los parámetros de consulta
-                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(word, "i"));
-                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(word, "i"));
+                    var urlFilter = filterBuilder.Regex(log => log.HttpUrl, new BsonRegularExpression(Regex.Escape(word), "i"));
+                    var queryParamsFilter = filterBuilder.Regex(log => log.QueryParams, new BsonRegularExpression(Regex.Escape(word), "i"));
                     filter &= filterBuilder.Or(urlFilter, queryParamsFilter);
                 }
             }

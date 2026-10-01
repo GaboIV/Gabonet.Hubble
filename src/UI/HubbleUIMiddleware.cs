@@ -1,7 +1,10 @@
 namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Middleware;
+using Gabonet.Hubble.Security;
 using Gabonet.Hubble.UI.Models;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
@@ -10,15 +13,35 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Web;
 
 /// <summary>
 /// Middleware para manejar las rutas de la interfaz de usuario de Hubble.
 /// </summary>
 public class HubbleUIMiddleware
 {
+    /// <summary>
+    /// Tamaño máximo de página permitido en el listado de logs (HTML y API).
+    /// </summary>
+    public const int MaxPageSize = 200;
+
+    private const string HtmlContentType = "text/html; charset=utf-8";
+    private const string TextContentType = "text/plain; charset=utf-8";
+    private const string JsonContentType = "application/json; charset=utf-8";
+
+    private const string ContentSecurityPolicy =
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
+        "form-action 'self'; frame-ancestors 'none'";
+
     private readonly RequestDelegate _next;
-    private const string HtmlContentType = "text/html";
+    private readonly HubbleLoginThrottle _loginThrottle = new HubbleLoginThrottle();
+
+    private enum AuthResult
+    {
+        Authenticated,
+        Unauthenticated,
+        LockedOut
+    }
 
     /// <summary>
     /// Constructor del middleware de la interfaz de usuario de Hubble.
@@ -33,227 +56,272 @@ public class HubbleUIMiddleware
     /// Método principal del middleware que procesa la solicitud HTTP.
     /// </summary>
     /// <param name="context">Contexto HTTP</param>
+    /// <param name="options">Opciones de Hubble</param>
+    /// <param name="antiforgery">Servicio antiforgery para proteger los formularios contra CSRF</param>
+    /// <param name="dataProtectionProvider">Proveedor de Data Protection para la cookie de sesión</param>
     /// <returns>Tarea asíncrona</returns>
-    public async Task InvokeAsync(HttpContext context, HubbleOptions options)
+    public async Task InvokeAsync(
+        HttpContext context,
+        HubbleOptions options,
+        IAntiforgery antiforgery,
+        IDataProtectionProvider dataProtectionProvider)
     {
-        var basePath = options.BasePath.ToLower();
-        var path = context.Request.Path.Value?.ToLower() ?? "";
-        
-        // Solo procesar solicitudes que empiecen con la ruta base de Hubble
-        if (!path.StartsWith(basePath))
+        // Solo procesar solicitudes bajo la ruta base de Hubble (comparación por segmentos: "/hubble" no coincide con "/hubblefoo")
+        if (!context.Request.Path.StartsWithSegments(NormalizeBasePath(options.BasePath), StringComparison.OrdinalIgnoreCase, out var remaining))
         {
             await _next(context);
             return;
         }
 
-        // Verificar autenticación si está habilitada
-        if (options.RequireAuthentication && !IsAuthenticated(context, options))
+        var subPath = (remaining.Value ?? string.Empty).TrimEnd('/').ToLowerInvariant();
+        var isApi = subPath == "/api" || subPath.StartsWith("/api/", StringComparison.Ordinal);
+        var isPost = HttpMethods.IsPost(context.Request.Method);
+
+        ApplySecurityHeaders(context.Response);
+
+        // El filtro de IPs solo protege el dashboard y la API de Hubble, nunca el resto de la aplicación
+        if (!HubbleIpAllowList.IsAllowed(context.Connection.RemoteIpAddress, options.Security.AllowedIps))
         {
-            if (path.Equals($"{basePath}/login", StringComparison.OrdinalIgnoreCase) && 
-                context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
-            {
-                await HandleLoginAsync(context, options);
-            }
-            else
-            {
-                await ShowLoginFormAsync(context);
-            }
+            await WriteErrorAsync(context, isApi, StatusCodes.Status403Forbidden, "Access denied: IP not allowed");
             return;
         }
 
-        // Manejar diferentes rutas
-        if (path.Equals(basePath, StringComparison.OrdinalIgnoreCase) || 
-            path.Equals($"{basePath}/", StringComparison.OrdinalIgnoreCase))
+        if (options.RequireAuthentication)
         {
-            await HandleHubbleHomeAsync(context);
+            var authResult = Authenticate(context, options, dataProtectionProvider);
+
+            if (authResult == AuthResult.LockedOut)
+            {
+                await WriteErrorAsync(context, isApi, StatusCodes.Status429TooManyRequests, "Too many failed login attempts. Try again later.");
+                return;
+            }
+
+            if (authResult != AuthResult.Authenticated)
+            {
+                if (subPath == "/login" && isPost)
+                {
+                    await HandleLoginAsync(context, options, antiforgery, dataProtectionProvider);
+                }
+                else if (isApi)
+                {
+                    context.Response.Headers.WWWAuthenticate = "Basic realm=\"Hubble\", charset=\"UTF-8\"";
+                    await WriteErrorAsync(context, true, StatusCodes.Status401Unauthorized, "Authentication required");
+                }
+                else
+                {
+                    await ShowLoginFormAsync(context, antiforgery);
+                }
+
+                return;
+            }
+
+            // Usuario ya autenticado que vuelve a la página de login
+            if (subPath == "/login")
+            {
+                context.Response.Redirect(GetDashboardUrl(options));
+                return;
+            }
         }
-        else if (path.StartsWith($"{basePath}/detail/", StringComparison.OrdinalIgnoreCase))
+
+        try
         {
-            await HandleHubbleDetailAsync(context);
+            if (isApi)
+            {
+                await HandleHubbleApiAsync(context, subPath.Substring("/api".Length));
+                return;
+            }
+
+            switch (subPath)
+            {
+                case "":
+                    await HandleHubbleHomeAsync(context);
+                    return;
+
+                case var detailPath when detailPath.StartsWith("/detail/", StringComparison.Ordinal):
+                    await HandleHubbleDetailAsync(context, (remaining.Value ?? string.Empty).TrimEnd('/').Substring("/detail/".Length));
+                    return;
+
+                case "/config":
+                    await HandleConfigPageAsync(context);
+                    return;
+
+                case "/logout":
+                    HandleLogout(context, options);
+                    return;
+            }
+
+            // Acciones que modifican estado: solo POST con token antiforgery válido
+            Func<HttpContext, Task>? stateChangingAction = subPath switch
+            {
+                "/delete-all" => HandleHubbleDeleteAllAsync,
+                "/run-prune" => HandleRunPruneAsync,
+                "/recalculate-stats" => HandleRecalculateStatsAsync,
+                "/save-config" => HandleSavePruneConfigAsync,
+                "/save-capture-config" => HandleSaveCaptureConfigAsync,
+                "/save-ignore-paths" => HandleSaveIgnorePathsAsync,
+                _ => null
+            };
+
+            if (stateChangingAction == null)
+            {
+                // Para cualquier otra ruta, continuar con el siguiente middleware
+                await _next(context);
+                return;
+            }
+
+            if (!isPost)
+            {
+                context.Response.Headers.Allow = HttpMethods.Post;
+                await WriteErrorAsync(context, false, StatusCodes.Status405MethodNotAllowed, "This action only accepts POST requests");
+                return;
+            }
+
+            if (!await antiforgery.IsRequestValidAsync(context))
+            {
+                await WriteErrorAsync(context, false, StatusCodes.Status400BadRequest, "Invalid or missing anti-forgery token. Reload the page and try again.");
+                return;
+            }
+
+            await stateChangingAction(context);
         }
-        else if (path.Equals($"{basePath}/delete-all", StringComparison.OrdinalIgnoreCase))
+        catch (Exception ex)
         {
-            await HandleHubbleDeleteAllAsync(context);
+            if (context.Response.HasStarted)
+            {
+                throw;
+            }
+
+            await WriteErrorAsync(context, isApi, StatusCodes.Status500InternalServerError, $"Internal server error: {ex.Message}");
         }
-        else if (path.StartsWith($"{basePath}/api/", StringComparison.OrdinalIgnoreCase))
+    }
+
+    private static PathString NormalizeBasePath(string? basePath)
+    {
+        var normalized = "/" + (basePath ?? string.Empty).Trim().Trim('/');
+        return new PathString(normalized == "/" ? "/hubble" : normalized);
+    }
+
+    private static string GetDashboardUrl(HubbleOptions options)
+    {
+        return options.PrefixPath.TrimEnd('/') + NormalizeBasePath(options.BasePath).Value;
+    }
+
+    private static void ApplySecurityHeaders(HttpResponse response)
+    {
+        var headers = response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers.XFrameOptions = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers.ContentSecurityPolicy = ContentSecurityPolicy;
+        // Los logs contienen datos sensibles: no deben quedar en caché del navegador ni de proxies
+        headers.CacheControl = "no-store, no-cache";
+        headers.Pragma = "no-cache";
+    }
+
+    private static async Task WriteErrorAsync(HttpContext context, bool asJson, int statusCode, string message)
+    {
+        context.Response.StatusCode = statusCode;
+
+        if (asJson)
         {
-            await HandleHubbleApiAsync(context);
-        }
-        else if (path.Equals($"{basePath}/logout", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleLogoutAsync(context);
-        }
-        // Nueva ruta para la página de configuración y estadísticas
-        else if (path.Equals($"{basePath}/config", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleConfigPageAsync(context);
-        }
-        // Ruta para ejecutar limpieza manual
-        else if (path.Equals($"{basePath}/run-prune", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleRunPruneAsync(context);
-        }
-        // Ruta para recalcular estadísticas
-        else if (path.Equals($"{basePath}/recalculate-stats", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleRecalculateStatsAsync(context);
-        }
-        // Ruta para guardar configuración de prune
-        else if (path.Equals($"{basePath}/save-config", StringComparison.OrdinalIgnoreCase) && 
-                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleSavePruneConfigAsync(context);
-        }
-        // Ruta para guardar configuración de captura
-        else if (path.Equals($"{basePath}/save-capture-config", StringComparison.OrdinalIgnoreCase) && 
-                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleSaveCaptureConfigAsync(context);
-        }
-        // Ruta para guardar rutas ignoradas
-        else if (path.Equals($"{basePath}/save-ignore-paths", StringComparison.OrdinalIgnoreCase) && 
-                 context.Request.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleSaveIgnorePathsAsync(context);
+            context.Response.ContentType = JsonContentType;
+            await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
+            {
+                Success = false,
+                Message = message
+            }));
         }
         else
         {
-            // Para cualquier otra ruta, continuar con el siguiente middleware
-            await _next(context);
+            // Texto plano para que un mensaje de error nunca se interprete como HTML
+            context.Response.ContentType = TextContentType;
+            await context.Response.WriteAsync(message);
         }
+    }
+
+    private static (int Page, int PageSize) ReadPagination(HttpContext context)
+    {
+        var page = int.TryParse(context.Request.Query["page"], out var parsedPage) ? parsedPage : 1;
+        var pageSize = int.TryParse(context.Request.Query["pageSize"], out var parsedPageSize) ? parsedPageSize : 50;
+
+        return (Math.Max(1, page), Math.Clamp(pageSize, 1, MaxPageSize));
     }
 
     private async Task HandleHubbleHomeAsync(HttpContext context)
     {
-        try
-        {
-            // Obtener parámetros de consulta
-            var method = context.Request.Query["method"].ToString();
-            var url = context.Request.Query["url"].ToString();
-            var statusGroup = context.Request.Query["statusGroup"].ToString();
-            var logType = context.Request.Query["logType"].ToString();
-            var pageStr = context.Request.Query["page"].ToString();
-            var pageSizeStr = context.Request.Query["pageSize"].ToString();
+        // Obtener parámetros de consulta
+        var method = context.Request.Query["method"].ToString();
+        var url = context.Request.Query["url"].ToString();
+        var statusGroup = context.Request.Query["statusGroup"].ToString();
+        var logType = context.Request.Query["logType"].ToString();
+        var (page, pageSize) = ReadPagination(context);
 
-            int page = 1;
-            int pageSize = 50;
+        // Obtener el controlador de Hubble
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.GetLogsViewAsync(method, url, statusGroup, logType, page, pageSize);
 
-            if (!string.IsNullOrEmpty(pageStr) && int.TryParse(pageStr, out int parsedPage))
-            {
-                page = parsedPage;
-            }
-
-            if (!string.IsNullOrEmpty(pageSizeStr) && int.TryParse(pageSizeStr, out int parsedPageSize))
-            {
-                pageSize = parsedPageSize;
-            }
-
-            // Obtener el controlador de Hubble
-            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-            var html = await hubbleController.GetLogsViewAsync(method, url, statusGroup, logType, page, pageSize);
-            
-            context.Response.ContentType = HtmlContentType;
-            await context.Response.WriteAsync(html);
-        }
-        catch (Exception ex)
-        {
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"Error: {ex.Message}");
-        }
+        context.Response.ContentType = HtmlContentType;
+        await context.Response.WriteAsync(html);
     }
 
-    private async Task HandleHubbleDetailAsync(HttpContext context)
+    private async Task HandleHubbleDetailAsync(HttpContext context, string id)
     {
-        try
-        {
-            var pathParts = context.Request.Path.Value?.Split('/') ?? Array.Empty<string>();
-            var id = pathParts.Length > 0 ? pathParts[pathParts.Length - 1] : "";
+        // Obtener el controlador de Hubble
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.GetLogDetailAsync(id);
 
-            // Obtener el controlador de Hubble
-            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-            var html = await hubbleController.GetLogDetailAsync(id ?? "");
-
-            context.Response.ContentType = HtmlContentType;
-            await context.Response.WriteAsync(html);
-        }
-        catch (Exception ex)
-        {
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"Error: {ex.Message}");
-        }
+        context.Response.ContentType = HtmlContentType;
+        await context.Response.WriteAsync(html);
     }
 
     private async Task HandleHubbleDeleteAllAsync(HttpContext context)
     {
-        try
+        // Check if delete all is allowed
+        var options = context.RequestServices.GetRequiredService<HubbleOptions>();
+        if (!options.AllowDeleteAll)
         {
-            // Check if delete all is allowed
-            var options = context.RequestServices.GetRequiredService<HubbleOptions>();
-            if (!options.AllowDeleteAll)
-            {
-                context.Response.StatusCode = 403;
-                await context.Response.WriteAsync("Delete all operation is not allowed");
-                return;
-            }
-
-            // Obtener el controlador de Hubble
-            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-            var html = await hubbleController.DeleteAllLogsAsync();
-
-            context.Response.ContentType = HtmlContentType;
-            await context.Response.WriteAsync(html);
+            await WriteErrorAsync(context, false, StatusCodes.Status403Forbidden, "Delete all operation is not allowed");
+            return;
         }
-        catch (Exception ex)
-        {
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"Error: {ex.Message}");
-        }
+
+        // Obtener el controlador de Hubble
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var html = await hubbleController.DeleteAllLogsAsync();
+
+        context.Response.ContentType = HtmlContentType;
+        await context.Response.WriteAsync(html);
     }
 
-    private async Task HandleHubbleApiAsync(HttpContext context)
+    private async Task HandleHubbleApiAsync(HttpContext context, string apiPath)
     {
-        try
+        var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
+        var method = context.Request.Method;
+
+        // Las peticiones que modifican estado deben ser JSON: un formulario de otro sitio no puede enviar
+        // application/json sin una petición CORS preflight, lo que bloquea ataques CSRF contra la API.
+        if (HttpMethods.IsPost(method) && !context.Request.HasJsonContentType())
         {
-            var path = context.Request.Path.Value?.ToLower() ?? "";
-            var method = context.Request.Method.ToUpper();
-            var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
-
-            context.Response.ContentType = "application/json";
-
-            // Extract the API path after /api/
-            var basePath = context.RequestServices.GetRequiredService<HubbleOptions>().BasePath.ToLower();
-            var apiPath = path.Substring($"{basePath}/api".Length);
-
-            switch (method)
-            {
-                case "GET":
-                    await HandleGetApiAsync(context, apiPath, hubbleController);
-                    break;
-                case "POST":
-                    await HandlePostApiAsync(context, apiPath, hubbleController);
-                    break;
-                case "DELETE":
-                    await HandleDeleteApiAsync(context, apiPath, hubbleController);
-                    break;
-                default:
-                    context.Response.StatusCode = 405; // Method Not Allowed
-                    await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
-                    {
-                        Success = false,
-                        Message = $"HTTP method {method} is not supported"
-                    }));
-                    break;
-            }
+            await WriteErrorAsync(context, true, StatusCodes.Status415UnsupportedMediaType, "Content-Type must be application/json");
+            return;
         }
-        catch (Exception ex)
+
+        context.Response.ContentType = JsonContentType;
+
+        switch (method.ToUpperInvariant())
         {
-            context.Response.StatusCode = 500;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonConvert.SerializeObject(new ApiResponse
-            {
-                Success = false,
-                Message = $"Internal server error: {ex.Message}"
-            }));
+            case "GET":
+                await HandleGetApiAsync(context, apiPath, hubbleController);
+                break;
+            case "POST":
+                await HandlePostApiAsync(context, apiPath, hubbleController);
+                break;
+            case "DELETE":
+                await HandleDeleteApiAsync(context, apiPath, hubbleController);
+                break;
+            default:
+                context.Response.Headers.Allow = "GET, POST, DELETE";
+                await WriteErrorAsync(context, true, StatusCodes.Status405MethodNotAllowed, $"HTTP method {method} is not supported");
+                break;
         }
     }
 
@@ -267,21 +335,7 @@ public class HubbleUIMiddleware
                 var url = context.Request.Query["url"].ToString();
                 var statusGroup = context.Request.Query["statusGroup"].ToString();
                 var logType = context.Request.Query["logType"].ToString();
-                var pageStr = context.Request.Query["page"].ToString();
-                var pageSizeStr = context.Request.Query["pageSize"].ToString();
-
-                int page = 1;
-                int pageSize = 50;
-
-                if (!string.IsNullOrEmpty(pageStr) && int.TryParse(pageStr, out int parsedPage))
-                {
-                    page = parsedPage;
-                }
-
-                if (!string.IsNullOrEmpty(pageSizeStr) && int.TryParse(pageSizeStr, out int parsedPageSize))
-                {
-                    pageSize = parsedPageSize;
-                }
+                var (page, pageSize) = ReadPagination(context);
 
                 var logsResponse = await controller.GetLogsApiAsync(method, url, statusGroup, logType, page, pageSize);
                 await context.Response.WriteAsync(JsonConvert.SerializeObject(logsResponse));
@@ -307,15 +361,10 @@ public class HubbleUIMiddleware
                 break;
 
             case "/prune":
-                // GET /api/prune - Run manual prune operation
-                var pruneResponse = await controller.RunManualPruneApiAsync();
-                await context.Response.WriteAsync(JsonConvert.SerializeObject(pruneResponse));
-                break;
-
             case "/recalculate-stats":
-                // GET /api/recalculate-stats - Recalculate statistics
-                var recalcResponse = await controller.RecalculateStatisticsApiAsync();
-                await context.Response.WriteAsync(JsonConvert.SerializeObject(recalcResponse));
+                // Estas operaciones modifican datos: ya no se aceptan por GET
+                context.Response.Headers.Allow = HttpMethods.Post;
+                await WriteErrorAsync(context, true, StatusCodes.Status405MethodNotAllowed, $"Use POST {apiPath} with Content-Type: application/json");
                 break;
 
             default:
@@ -340,6 +389,18 @@ public class HubbleUIMiddleware
 
         switch (apiPath)
         {
+            case "/prune":
+                // POST /api/prune - Run manual prune operation
+                var manualPruneResponse = await controller.RunManualPruneApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(manualPruneResponse));
+                break;
+
+            case "/recalculate-stats":
+                // POST /api/recalculate-stats - Recalculate statistics
+                var recalcResponse = await controller.RecalculateStatisticsApiAsync();
+                await context.Response.WriteAsync(JsonConvert.SerializeObject(recalcResponse));
+                break;
+
             case "/config/prune":
                 // POST /api/config/prune - Save prune configuration
                 var pruneRequest = JsonConvert.DeserializeObject<SavePruneConfigRequest>(requestBody);
@@ -440,71 +501,89 @@ public class HubbleUIMiddleware
         }
     }
 
-    private async Task HandleLoginAsync(HttpContext context, HubbleOptions options)
+    private async Task HandleLoginAsync(
+        HttpContext context,
+        HubbleOptions options,
+        IAntiforgery antiforgery,
+        IDataProtectionProvider dataProtectionProvider)
     {
-        var basePath = options.BasePath.ToLower();
-        var prefixPath = options.PrefixPath.ToLower();
-        
-        // Leer el cuerpo de la solicitud para obtener las credenciales
-        context.Request.EnableBuffering();
-        using var reader = new System.IO.StreamReader(context.Request.Body, Encoding.UTF8, true, 1024, true);
-        var body = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0;
+        var clientKey = GetClientKey(context);
+
+        if (!context.Request.HasFormContentType || !await antiforgery.IsRequestValidAsync(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await ShowLoginFormAsync(context, antiforgery, "La sesión del formulario expiró. Inténtalo de nuevo.");
+            return;
+        }
 
         // Procesar los datos del formulario
-        var formData = System.Web.HttpUtility.ParseQueryString(body);
-        var username = formData["username"];
-        var password = formData["password"];
+        var form = await context.Request.ReadFormAsync();
+        var username = form["username"].ToString();
+        var password = form["password"].ToString();
 
-        if (username == options.Username && password == options.Password)
+        if (HubbleAuthTokens.CredentialsMatch(username, password, options.Username, options.Password))
         {
-            // Crear una cookie de autenticación
-            context.Response.Cookies.Append("HubbleAuth", GenerateAuthToken(username, password), new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = context.Request.IsHttps,
-                SameSite = SameSiteMode.Lax,
-                Expires = DateTimeOffset.Now.AddHours(8), // La cookie expira después de 8 horas
-                Path = prefixPath + basePath // Solo válida para las rutas de Hubble
-            });
+            _loginThrottle.RegisterSuccess(clientKey);
+
+            var dashboardUrl = GetDashboardUrl(options);
+
+            // Cookie de sesión cifrada y firmada con Data Protection (no se puede falsificar ni modificar)
+            context.Response.Cookies.Append(
+                HubbleAuthTokens.CookieName,
+                HubbleAuthTokens.CreateSessionToken(dataProtectionProvider, options.Username, options.Password),
+                new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = context.Request.IsHttps,
+                    SameSite = SameSiteMode.Strict,
+                    Expires = DateTimeOffset.UtcNow.Add(HubbleAuthTokens.SessionLifetime),
+                    Path = dashboardUrl // Solo válida para las rutas de Hubble
+                });
 
             // Redirigir al usuario a la página principal de Hubble
-            context.Response.Redirect(prefixPath + basePath);
+            context.Response.Redirect(dashboardUrl);
+            return;
         }
-        else
+
+        _loginThrottle.RegisterFailure(clientKey);
+
+        if (_loginThrottle.IsLockedOut(clientKey))
         {
-            // Si las credenciales son incorrectas, mostrar el formulario de inicio de sesión con error
-            await ShowLoginFormAsync(context, true);
+            await WriteErrorAsync(context, false, StatusCodes.Status429TooManyRequests, "Too many failed login attempts. Try again later.");
+            return;
         }
+
+        // Si las credenciales son incorrectas, mostrar el formulario de inicio de sesión con error
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await ShowLoginFormAsync(context, antiforgery, "Nombre de usuario o contraseña incorrectos");
     }
 
-    private async Task HandleLogoutAsync(HttpContext context)
+    private static void HandleLogout(HttpContext context, HubbleOptions options)
     {
-        var options = context.RequestServices.GetRequiredService<HubbleOptions>();
-        var basePath = options.BasePath.ToLower();
-        var prefixPath = options.PrefixPath.ToLower();
+        var dashboardUrl = GetDashboardUrl(options);
 
         // Eliminar la cookie de autenticación
-        context.Response.Cookies.Delete("HubbleAuth", new CookieOptions
+        context.Response.Cookies.Delete(HubbleAuthTokens.CookieName, new CookieOptions
         {
-            Path = prefixPath + basePath    
+            Path = dashboardUrl
         });
 
         // Redirigir al formulario de inicio de sesión
-        context.Response.Redirect(prefixPath + basePath);
+        context.Response.Redirect(dashboardUrl);
     }
 
-    private async Task ShowLoginFormAsync(HttpContext context, bool showError = false)
+    private async Task ShowLoginFormAsync(HttpContext context, IAntiforgery antiforgery, string? errorMessage = null)
     {
         var options = context.RequestServices.GetRequiredService<HubbleOptions>();
-        var basePath = options.BasePath.ToLower();
-        var prefixPath = options.PrefixPath.ToLower();
-        
+        var loginUrl = HubbleHtml.Encode(GetDashboardUrl(options) + "/login");
+        var tokens = antiforgery.GetAndStoreTokens(context);
+        var antiforgeryField = $"<input type='hidden' name='{HubbleHtml.Encode(tokens.FormFieldName)}' value='{HubbleHtml.Encode(tokens.RequestToken)}' />";
+
         // Obtener el controlador para acceder al logo y la versión
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var hubbleLogo = hubbleController.GetHubbleLogo();
-        var version = hubbleController.GetVersion();
-        
+        var version = HubbleHtml.Encode(hubbleController.GetVersion());
+
         var html = $@"
 <!DOCTYPE html>
 <html lang='es'>
@@ -694,9 +773,10 @@ public class HubbleUIMiddleware
             <p class='login-subtitle'>Inicia sesión para continuar</p>
         </div>
         
-        {(showError ? @"<div class='error-message'>Nombre de usuario o contraseña incorrectos</div>" : "")}
-        
-        <form class='login-form' method='post' action='{prefixPath}{basePath}/login'>
+        {(errorMessage != null ? $"<div class='error-message'>{HubbleHtml.Encode(errorMessage)}</div>" : "")}
+
+        <form class='login-form' method='post' action='{loginUrl}'>
+            {antiforgeryField}
             <div class='form-group'>
                 <label for='username'>Nombre de usuario</label>
                 <input type='text' id='username' name='username' required autofocus />
@@ -737,133 +817,83 @@ public class HubbleUIMiddleware
 </body>
 </html>";
 
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
 
-    private bool IsAuthenticated(HttpContext context, HubbleOptions options)
+    private AuthResult Authenticate(HttpContext context, HubbleOptions options, IDataProtectionProvider dataProtectionProvider)
     {
-        // Si no se requiere autenticación, considerar siempre autenticado
-        if (!options.RequireAuthentication)
+        // Autenticación básica HTTP (pensada para clientes de la API)
+        if (TryReadBasicCredentials(context, out var username, out var password))
         {
-            return true;
+            var clientKey = GetClientKey(context);
+            if (_loginThrottle.IsLockedOut(clientKey))
+            {
+                return AuthResult.LockedOut;
+            }
+
+            if (HubbleAuthTokens.CredentialsMatch(username, password, options.Username, options.Password))
+            {
+                _loginThrottle.RegisterSuccess(clientKey);
+                return AuthResult.Authenticated;
+            }
+
+            _loginThrottle.RegisterFailure(clientKey);
+            return _loginThrottle.IsLockedOut(clientKey) ? AuthResult.LockedOut : AuthResult.Unauthenticated;
         }
 
-        // Verificar autenticación básica HTTP primero
-        if (IsBasicAuthValid(context, options))
+        // Cookie de sesión emitida por el formulario de login
+        if (context.Request.Cookies.TryGetValue(HubbleAuthTokens.CookieName, out var authToken) &&
+            HubbleAuthTokens.ValidateSessionToken(dataProtectionProvider, authToken, options.Username, options.Password))
         {
-            return true;
+            return AuthResult.Authenticated;
         }
 
-        // Verificar si existe la cookie de autenticación
-        if (context.Request.Cookies.TryGetValue("HubbleAuth", out string? authToken))
-        {
-            // Verificar que el token sea válido
-            return ValidateAuthToken(authToken, options.Username, options.Password);
-        }
-
-        return false;
+        return AuthResult.Unauthenticated;
     }
 
-    private bool IsBasicAuthValid(HttpContext context, HubbleOptions options)
+    private static bool TryReadBasicCredentials(HttpContext context, out string username, out string password)
     {
-        try
-        {
-            // Verificar si hay encabezado de autorización
-            if (!context.Request.Headers.ContainsKey("Authorization"))
-            {
-                return false;
-            }
+        username = string.Empty;
+        password = string.Empty;
 
-            var authHeader = context.Request.Headers["Authorization"].ToString();
-            
-            // Verificar que sea Basic Auth
-            if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            // Decodificar las credenciales
-            var encodedCredentials = authHeader.Substring("Basic ".Length).Trim();
-            var decodedBytes = Convert.FromBase64String(encodedCredentials);
-            var credentials = Encoding.UTF8.GetString(decodedBytes);
-            
-            // Separar usuario y contraseña
-            var parts = credentials.Split(':', 2);
-            if (parts.Length != 2)
-            {
-                return false;
-            }
-
-            var username = parts[0];
-            var password = parts[1];
-
-            // Verificar las credenciales
-            return username == options.Username && password == options.Password;
-        }
-        catch
+        var authHeader = context.Request.Headers.Authorization.ToString();
+        if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
-    }
 
-    private static string GenerateAuthToken(string username, string password)
-    {
-        // Crear un token simple basado en username
-        // En un entorno de producción, se recomendaría usar algo más seguro como JWT
-        var tokenData = $"{username}:{DateTime.UtcNow.Ticks}";
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(tokenData));
-    }
-
-    private static bool ValidateAuthToken(string token, string username, string password)
-    {
         try
         {
-            // Decodificar el token
-            var tokenData = Encoding.UTF8.GetString(Convert.FromBase64String(token));
-            var parts = tokenData.Split(':');
-            
-            // Verificar que el token tenga el formato correcto
-            if (parts.Length != 2)
+            var credentials = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Substring("Basic ".Length).Trim()));
+            var separatorIndex = credentials.IndexOf(':');
+            if (separatorIndex < 0)
             {
-                return false;
+                // Cabecera mal formada: se trata como un intento fallido
+                return true;
             }
 
-            // Verificar que el username en el token coincida con el configurado
-            var tokenUsername = parts[0];
-            if (tokenUsername != username)
-            {
-                return false;
-            }
-
-            // Verificar que el token no haya expirado (8 horas)
-            if (long.TryParse(parts[1], out long timestamp))
-            {
-                var tokenTime = new DateTime(timestamp, DateTimeKind.Utc);
-                if (DateTime.UtcNow.Subtract(tokenTime).TotalHours > 8)
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                return false;
-            }
-
+            username = credentials.Substring(0, separatorIndex);
+            password = credentials.Substring(separatorIndex + 1);
             return true;
         }
-        catch
+        catch (FormatException)
         {
-            return false;
+            return true;
         }
     }
-    
+
+    private static string GetClientKey(HttpContext context)
+    {
+        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
     private async Task HandleConfigPageAsync(HttpContext context)
     {
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.GetConfigurationPageAsync();
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
     
@@ -872,7 +902,7 @@ public class HubbleUIMiddleware
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.RunManualPruneAsync();
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
     
@@ -881,7 +911,7 @@ public class HubbleUIMiddleware
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.RecalculateStatisticsAsync();
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
     
@@ -905,7 +935,7 @@ public class HubbleUIMiddleware
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.SavePruneConfigAsync(enableDataPrune, dataPruneIntervalHours, maxLogAgeHours);
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
     
@@ -920,7 +950,7 @@ public class HubbleUIMiddleware
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.SaveCaptureConfigAsync(captureHttpRequests, captureLoggerMessages, minimumLogLevel);
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
     
@@ -933,7 +963,7 @@ public class HubbleUIMiddleware
         var hubbleController = context.RequestServices.GetRequiredService<HubbleController>();
         var html = await hubbleController.SaveIgnorePathsAsync(ignorePaths);
         
-        context.Response.ContentType = "text/html";
+        context.Response.ContentType = HtmlContentType;
         await context.Response.WriteAsync(html);
     }
 } 

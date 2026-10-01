@@ -18,10 +18,12 @@ builder.Services.AddSwaggerGen();
 
 // Opción recomendada: Cargar configuración desde appsettings.json
 builder.Services.AddHubble(
-    builder.Configuration,                                              // Configuración de la aplicación
-    builder.Configuration.GetConnectionString("MongoConnection")!,     // Conexión a MongoDB
-    "HubbleDB"                                                         // Nombre de la base de datos
-);
+    builder.Configuration.GetSection("Hubble"),                    // Sección "Hubble" de appsettings.json
+    options =>
+    {
+        options.ConnectionString = builder.Configuration.GetConnectionString("MongoConnection")!;
+        options.DatabaseName = "HubbleDB";
+    });
 
 // Agregar logging de Hubble para capturar logs de ILogger
 builder.Logging.AddHubbleLogging();
@@ -120,7 +122,6 @@ public class Product
     ],
     "IgnoreStaticFiles": true,
     "EnableDataPrune": true,
-    "DataPruneIntervalHours": 24,
     "MaxLogAgeHours": 168,
     "TimeZoneId": "America/Mexico_City",
     "HighlightNewServices": false,

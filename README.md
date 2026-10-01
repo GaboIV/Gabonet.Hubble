@@ -1,1036 +1,570 @@
-# Hubble para .NET
-
-Hubble es una biblioteca para monitoreo y logging de aplicaciones .NET que permite capturar y visualizar solicitudes HTTP, logs de ILogger y consultas a bases de datos en una interfaz web integrada.
-
-## Configuración
-
-### 1. Instalación
-
-Añade Hubble a tu proyecto:
-
-```bash
-dotnet add package Gabonet.Hubble
-```
-
-### 2. Configuración en Program.cs
-
-```csharp
-// Program.cs o Startup.cs
-using Gabonet.Hubble.Extensions;
-using Microsoft.Extensions.Logging;
-
-// ...
-
-// Agregar Hubble con la configuración necesaria
-builder.Services.AddHubble(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017"; // Requerido: Conexión a MongoDB
-    options.DatabaseName = "HubbleDB";                      // Requerido: Nombre de la base de datos
-    options.ServiceName = "MiAplicación";                   // Opcional: Nombre del servicio
-    options.TimeZoneId = "Romance Standard Time";           // Opcional: Zona horaria para mostrar logs
-    options.EnableDiagnostics = true;                       // Opcional: Mostrar mensajes de diagnóstico
-    options.CaptureLoggerMessages = true;                   // Opcional: Capturar logs de ILogger (true por defecto)
-    options.BasePath = "/logs";                             // Opcional: Ruta personalizada para acceder a Hubble (por defecto: /hubble)
-});
-
-// Añadir el proveedor de logs de Hubble para capturar los logs de ILogger
-builder.Logging.AddHubbleLogging(LogLevel.Information);  // Puedes cambiar el nivel mínimo de logs
-
-// ...
-
-// Agregar el middleware de Hubble (debe ir antes de app.UseRouting())
-app.UseHubble();
-```
-
-### Ignorar rutas específicas
-
-Hubble permite configurar rutas específicas que serán ignoradas por el middleware, lo que es útil para endpoints como health checks, métricas o cualquier otra ruta que no desees monitorear.
-
-```csharp
-services.AddHubble(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "hubble";
-    options.ServiceName = "MiServicio";
-
-    // Configurar rutas a ignorar
-    options.IgnorePaths = new List<string>
-    {
-        "/health",
-        "/metrics",
-        "/test",
-        "/swagger"
-    };
-});
-```
-
-Todas las rutas que comiencen con cualquiera de los prefijos especificados en `IgnorePaths` serán ignoradas por el middleware de Hubble. Por ejemplo, si especificas `/health`, se ignorarán rutas como `/health`, `/health/status`, `/health/check`, etc.
-
-### Ejemplo completo de configuración
-
-```csharp
-services.AddHubble(options =>
-{
-    // Configuración obligatoria
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "hubble";
-    
-    // Configuración general
-    options.ServiceName = "MiServicio";
-    options.BasePath = "/hubble";
-    options.TimeZoneId = "America/Argentina/Buenos_Aires";
-    options.EnableDiagnostics = false;
-    
-    // Captura de datos
-    options.CaptureLoggerMessages = true;
-    options.CaptureHttpRequests = true;
-    options.IgnoreStaticFiles = true;
-    
-    // Rutas a ignorar
-    options.IgnorePaths = new List<string>
-# Hubble para .NET
-
-Hubble es una biblioteca para monitoreo y logging de aplicaciones .NET que permite capturar y visualizar solicitudes HTTP, logs de ILogger y consultas a bases de datos en una interfaz web integrada.
-
-## Configuración
-
-### 1. Instalación
-
-Añade Hubble a tu proyecto:
-
-```bash
-dotnet add package Gabonet.Hubble
-```
-
-### 2. Configuración en Program.cs
-
-```csharp
-// Program.cs o Startup.cs
-using Gabonet.Hubble.Extensions;
-using Microsoft.Extensions.Logging;
-
-// ...
-
-// Agregar Hubble con la configuración necesaria
-builder.Services.AddHubble(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017"; // Requerido: Conexión a MongoDB
-    options.DatabaseName = "HubbleDB";                      // Requerido: Nombre de la base de datos
-    options.ServiceName = "MiAplicación";                   // Opcional: Nombre del servicio
-    options.TimeZoneId = "Romance Standard Time";           // Opcional: Zona horaria para mostrar logs
-    options.EnableDiagnostics = true;                       // Opcional: Mostrar mensajes de diagnóstico
-    options.CaptureLoggerMessages = true;                   // Opcional: Capturar logs de ILogger (true por defecto)
-    options.BasePath = "/logs";                             // Opcional: Ruta personalizada para acceder a Hubble (por defecto: /hubble)
-});
-
-// Añadir el proveedor de logs de Hubble para capturar los logs de ILogger
-builder.Logging.AddHubbleLogging(LogLevel.Information);  // Puedes cambiar el nivel mínimo de logs
-
-// ...
-
-// Agregar el middleware de Hubble (debe ir antes de app.UseRouting())
-app.UseHubble();
-```
-
-### Ignorar rutas específicas
-
-Hubble permite configurar rutas específicas que serán ignoradas por el middleware, lo que es útil para endpoints como health checks, métricas o cualquier otra ruta que no desees monitorear.
-
-```csharp
-services.AddHubble(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "hubble";
-    options.ServiceName = "MiServicio";
-
-    // Configurar rutas a ignorar
-    options.IgnorePaths = new List<string>
-    {
-        "/health",
-        "/metrics",
-        "/test",
-        "/swagger"
-    };
-});
-```
-
-Todas las rutas que comiencen con cualquiera de los prefijos especificados en `IgnorePaths` serán ignoradas por el middleware de Hubble. Por ejemplo, si especificas `/health`, se ignorarán rutas como `/health`, `/health/status`, `/health/check`, etc.
-
-### Ejemplo completo de configuración
-
-```csharp
-services.AddHubble(options =>
-{
-    // Configuración obligatoria
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "hubble";
-    
-    // Configuración general
-    options.ServiceName = "MiServicio";
-    options.BasePath = "/hubble";
-    options.TimeZoneId = "America/Argentina/Buenos_Aires";
-    options.EnableDiagnostics = false;
-    
-    // Captura de datos
-    options.CaptureLoggerMessages = true;
-    options.CaptureHttpRequests = true;
-    options.IgnoreStaticFiles = true;
-    
-    // Rutas a ignorar
-    options.IgnorePaths = new List<string>
-    {
-        "/health",
-        "/metrics",
-        "/swagger"
-    };
-    
-    // Configuración de Seguridad
-    options.Security = new SecurityConfiguration
-    {
-        // Enmascaramiento de datos (Case-Insensitive)
-        // Se aplica tanto a Request como a Response
-        MaskBodyProperties = new List<string> { "password", "token", "tarjeta", "cvv" },
-        
-        // Propiedades adicionales para enmascarar SOLO en el Request
-        MaskRequestBodyProperties = new List<string> { "pin", "clave" },
-
-        // Propiedades adicionales para enmascarar SOLO en el Response
-        MaskResponseBodyProperties = new List<string> { "internalId", "secretData" },
-        
-        // Headers a enmascarar
-        MaskHeaders = new List<string> { "Authorization", "X-Api-Key", "Cookie" },
-        
-        // Filtrado de IPs (CIDR soportado)
-        // Dejar lista vacía o incluir "*" para permitir todas las IPs
-        AllowedIps = new List<string> { "127.0.0.1", "192.168.1.0/24" }
-    };
-
-    // Limpieza automática de datos
-    options.EnableDataPrune = true;
-    options.DataPruneIntervalHours = 24; // Ejecutar cada 24 horas
-    options.MaxLogAgeHours = 72;         // Mantener logs por 3 días
-
-    // UI
-    options.HighlightNewServices = true;
-    options.HighlightDurationSeconds = 10;
-    
-    // Autenticación para el dashboard
-    options.RequireAuthentication = true;
-    options.Username = "admin";
-    options.Password = "securePassword123";
-});
-
-// Agregar el middleware a la pipeline
-app.UseHubble();
-```
-
-### Características de Seguridad
-
-#### Enmascaramiento de Datos (Masking)
-Hubble permite proteger información sensible en los logs mediante enmascaramiento:
-- **Case-Insensitive**: El enmascaramiento no distingue entre mayúsculas y minúsculas (ej. "password", "Password", "PASSWORD" serán enmascarados).
-- **Body Request/Response**: `MaskBodyProperties` aplica a ambos.
-- **Request Específico**: `MaskRequestBodyProperties` permite definir campos que solo deben ocultarse en la solicitud.
-- **Response Específico**: `MaskResponseBodyProperties` permite definir campos que solo deben ocultarse en la respuesta.
-- **Headers**: `MaskHeaders` protege cabeceras sensibles como tokens de autorización.
-
-#### Control de Acceso por IP
-Puedes restringir el acceso al dashboard de Hubble:
-- **Lista Vacía**: Si `AllowedIps` está vacía, se permite el acceso a **todas** las IPs.
-- **Comodín**: Si la lista contiene `*`, se permite el acceso a **todas** las IPs.
-- **CIDR**: Soporta notación CIDR para rangos de IP (ej. `192.168.1.0/24`).
-- **IPs Individuales**: Soporta IPs específicas (ej. `127.0.0.1`).
-
-## Uso
-
-### Visualización de logs
-
-Para ver los logs, accede a la interfaz web integrada. Por defecto, la ruta es:
-
-```
-https://tu-aplicacion/hubble
-```
-
-Si has configurado una ruta personalizada con `options.BasePath`, deberás usar esa ruta en su lugar:
-
-```
-https://tu-aplicacion/logs  // Si configuraste options.BasePath = "/logs"
-```
-
-### Captura de logs de ILogger y asociación con solicitudes HTTP
-
-Hubble ahora puede capturar los logs generados con `ILogger` y asociarlos automáticamente a la solicitud HTTP que los generó. Esto facilita enormemente la depuración de problemas.
-
-#### 1. Usando ILogger en tus controladores y servicios
-
-En tus controladores y servicios, simplemente usa ILogger como siempre:
-
-```csharp
-public class MiControlador : Controller
-{
-    private readonly ILogger<MiControlador> _logger;
-
-    public MiControlador(ILogger<MiControlador> logger)
-    {
-        _logger = logger;
-    }
-
-    public IActionResult Index()
-    {
-        _logger.LogInformation("Solicitud recibida para la página principal");
-        // Tu código aquí
-        _logger.LogDebug("Operación completada");
-        return View();
-    }
-}
-```
-
-#### 2. Visualización de logs relacionados
-
-Cuando accedas a la página de detalles de una solicitud HTTP en `/hubble/detail/{id}`, verás una sección llamada "Logger" que muestra todos los logs de ILogger relacionados con esa solicitud, agrupados por categoría (namespace del logger).
-
-### Enmascaramiento de datos en logs personalizados
-
-Hubble proporciona una utilidad para enmascarar datos sensibles en tus propios logs, utilizando la misma configuración de enmascaramiento que se aplica a las solicitudes y respuestas HTTP.
-
-#### Uso del Helper de Enmascaramiento
-
-```csharp
-using Gabonet.Hubble.Utilities;
-
-public class PlayerService
-{
-    private readonly ILogger<PlayerService> _logger;
-    private readonly IPlayerRepository _playerRepository;
-
-    public PlayerService(
-        ILogger<PlayerService> logger,
-        IPlayerRepository playerRepository)
-    {
-        _logger = logger;
-        _playerRepository = playerRepository;
-    }
-
-    public async Task<PlayerDto> CreatePlayerAsync(PlayerDto playerDto)
-    {
-        var player = MapToEntity(playerDto);
-        player.Id = Guid.NewGuid();
-        
-        // Use HubbleMaskingHelper to serialize and mask sensitive data
-        _logger.LogInformation("Creating player: {Player}", 
-            HubbleMaskingHelper.SerializeMasked(playerDto));
-        
-        var createdPlayer = await _playerRepository.AddAsync(player);
-        
-        // Also works with entity objects
-        _logger.LogInformation("Player created: {Player}", 
-            HubbleMaskingHelper.SerializeMasked(createdPlayer));
-        
-        return MapToDto(createdPlayer);
-    }
-}
-```
-
-#### Métodos disponibles
-
-**`SerializeMasked<T>(T obj, List<string>? additionalMaskProperties = null, bool indent = false)`**
-
-Serializa un objeto a JSON y enmascara las propiedades sensibles según la configuración de Hubble.
-
-```csharp
-// Basic usage
-var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject);
-
-// With additional properties to mask
-var maskedJson = HubbleMaskingHelper.SerializeMasked(
-    myObject, 
-    new List<string> { "customField", "secretData" }
-);
-
-// With indented JSON for better readability
-var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject, indent: true);
-```
-
-**`MaskJson(string jsonString, List<string>? additionalMaskProperties = null)`**
-
-Enmascara propiedades sensibles en un string JSON ya serializado.
-
-```csharp
-var jsonString = JsonSerializer.Serialize(myObject);
-var maskedJson = HubbleMaskingHelper.MaskJson(jsonString);
-
-// With additional mask properties
-var maskedJson = HubbleMaskingHelper.MaskJson(
-    jsonString, 
-    new List<string> { "customField" }
-);
-```
-
-#### Características
-
-- **Automático**: Utiliza la configuración de `MaskBodyProperties`, `MaskRequestBodyProperties` y `MaskResponseBodyProperties` de Hubble.
-- **Case-Insensitive**: No distingue entre mayúsculas y minúsculas.
-- **Recursivo**: Enmascara propiedades en objetos anidados y arrays.
-- **Propiedades adicionales**: Permite agregar propiedades adicionales a enmascarar en tiempo de ejecución.
-- **Seguro**: Si Hubble no está inicializado o hay errores, devuelve el JSON sin enmascarar o un mensaje de error.
-
-#### Ejemplo con datos sensibles
-
-```csharp
-public class UserDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; }
-    public string Email { get; set; }
-    public string Password { get; set; }  // Sensitive
-    public string Token { get; set; }     // Sensitive
-    public string CreditCard { get; set; } // Sensitive
-}
-
-var user = new UserDto 
-{
-    Id = Guid.NewGuid(),
-    Name = "John Doe",
-    Email = "john@example.com",
-    Password = "SecretPass123",
-    Token = "abc123xyz",
-    CreditCard = "4111111111111111"
-};
-
-// Log with masking
-_logger.LogInformation("User data: {User}", 
-    HubbleMaskingHelper.SerializeMasked(user));
-
-// Output: User data: {"Id":"...","Name":"John Doe","Email":"john@example.com","Password":"*****","Token":"*****","CreditCard":"*****"}
-```
-
-### Implementación técnica
-
-La asociación entre logs de ILogger y solicitudes HTTP funciona de la siguiente manera:
-
-1. Cuando llega una solicitud HTTP, el middleware `HubbleMiddleware` crea un registro de log y lo guarda en el contexto HTTP (`HttpContext.Items["Hubble_RequestLog"]`).
-
-2. Cuando se genera un log con ILogger, el proveedor `HubbleLoggerProvider` comprueba si existe una solicitud HTTP activa con un log asociado y, si es así, registra el log con una referencia al ID de la solicitud.
-
-3. Cuando se consulta el detalle de una solicitud en la interfaz web, se buscan y muestran todos los logs relacionados con esa solicitud.
-
-## Solución de problemas
-
-Si no ves los logs relacionados en la interfaz:
-
-1. Asegúrate de que has configurado correctamente Hubble con `AddHubble()` y `UseHubble()`.
-
-2. Verifica que has añadido el proveedor de logs con `builder.Logging.AddHubbleLogging()`.
-
-3. Comprueba que estás usando `ILogger<T>` en tus clases para generar logs.
-
-4. Asegúrate de que los logs se generan durante el procesamiento de solicitudes HTTP, no antes o después.
-
-5. Revisa la consola y los logs para ver si hay mensajes de diagnóstico que indiquen algún problema.
+# Hubble for .NET
+
+Hubble is an embedded monitoring and logging dashboard for ASP.NET Core applications, in the spirit of Laravel Telescope. It captures HTTP requests and responses, `ILogger` messages and database queries, correlates them per request, stores them in MongoDB and shows them in a built-in web UI — no extra service to deploy.
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Securing the dashboard](#securing-the-dashboard)
+- [Capturing ILogger messages](#capturing-ilogger-messages)
+- [Capturing database queries](#capturing-database-queries)
+- [Masking sensitive data](#masking-sensitive-data)
+- [How capture works (and what happens if MongoDB is down)](#how-capture-works-and-what-happens-if-mongodb-is-down)
+- [Data retention and MongoDB setup](#data-retention-and-mongodb-setup)
+- [Healthy implementation checklist](#healthy-implementation-checklist)
+- [Web UI and REST API](#web-ui-and-rest-api)
+- [Building from source](#building-from-source)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [Upgrade notes](#upgrade-notes)
 
 ## Features
 
-- 🔍 **HTTP Request Monitoring**: Automatically captures all HTTP requests and responses.
-- 📊 **Database Query Logging**: Captures SQL queries and their parameters for different database providers.
-- 🚀 **Modern User Interface**: View logs with a modern and user-friendly web interface.
-- 🔄 **Filtering and Search**: Filter logs by HTTP method, URL, and more.
-- ⚡ **Optimized Performance**: Designed to have minimal impact on your application's performance.
-- 🛠️ **Easy Integration**: Seamlessly integrates into existing ASP.NET Core applications.
-- 🕒 **Time Zone Support**: Display logs in your preferred time zone.
+- **HTTP capture**: method, path, query string, headers, request and response bodies, status code and duration.
+- **ILogger correlation**: log messages written while a request is being processed are linked to that request and shown in its detail page.
+- **Database queries**: SQL captured through Entity Framework Core interceptors or ADO.NET, plus an example for MongoDB command monitoring.
+- **Data masking**: case-insensitive, recursive masking of JSON properties and headers, with a helper for your own logs.
+- **Built-in dashboard**: filtering, search, pagination and a JSON REST API.
+- **Dashboard security**: optional login with a signed session cookie, CSRF protection, brute-force lockout, IP/CIDR allow-list and hardened response headers.
+- **Non-blocking capture**: logs are queued in memory and written to MongoDB in the background, so a slow or unavailable MongoDB never slows down or breaks your application.
+- **Retention**: optional automatic pruning of old logs.
 
-## Installation
+## Requirements
 
-Install the NuGet package using the NuGet Package Manager:
+| Component | Version |
+|---|---|
+| Host application | ASP.NET Core on .NET 6, 7, 8 or later (the package targets `net6.0`, `net7.0` and `net8.0`; .NET 9+ uses the `net8.0` build) |
+| Storage | A MongoDB server supported by `MongoDB.Driver` 3.2 |
+| Optional | Entity Framework Core for SQL capture (the package depends on EF Core 6, 7 or 8 to match your target framework) |
 
-```
-Install-Package Gabonet.Hubble
-```
+## Quick start
 
-Or using the .NET CLI:
+### 1. Install the package
 
-```
+```bash
 dotnet add package Gabonet.Hubble
 ```
 
-## Basic Usage
-
-### 1. Configuration in Program.cs
+### 2. Register and enable Hubble
 
 ```csharp
 using Gabonet.Hubble.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add Hubble services
 builder.Services.AddHubble(options =>
 {
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "HubbleDB";
-    options.TimeZoneId = "America/New_York"; // Optional: Set your preferred time zone
+    options.ConnectionString = builder.Configuration.GetConnectionString("Hubble")!; // required
+    options.DatabaseName = "HubbleDB";                                                 // required
+    options.ServiceName = "Orders.Api";
+
+    // Never monitor health checks, metrics, docs or streaming endpoints (see "Known limitations")
+    options.IgnorePaths = new List<string> { "/health", "/metrics", "/swagger" };
+
+    // Protect the dashboard (credentials come from configuration / secrets, never source code)
+    options.RequireAuthentication = true;
+    options.Username = builder.Configuration["Hubble:Username"]!;
+    options.Password = builder.Configuration["Hubble:Password"]!;
 });
 
-var app = builder.Build();
-
-// Configure Hubble middleware
-app.UseHubble();
-
-// Rest of the application configuration...
-```
-
-### 2. Capturing Database Queries with Entity Framework Core
-
-Configure your DbContext to use the Hubble interceptor by adding the AddHubbleInterceptor extension method in the OnConfiguring method:
-
-```csharp
-using Gabonet.Hubble.Extensions;
-using Microsoft.EntityFrameworkCore;
-
-public class MyDbContext : DbContext
-{
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    
-    public MyDbContext(
-        DbContextOptions<MyDbContext> options,
-        IHttpContextAccessor httpContextAccessor) : base(options)
-    {
-        _httpContextAccessor = httpContextAccessor;
-    }
-    
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        optionsBuilder.AddHubbleInterceptor(_httpContextAccessor, "MyDatabase");
-        base.OnConfiguring(optionsBuilder);
-    }
-    
-    // DbSets definition...
-}
-```
-
-Alternatively, you can configure the interceptor when registering your DbContext in the service collection:
-
-```csharp
-// In Program.cs or Startup.cs
-services.AddDbContext<MyDbContext>((serviceProvider, optionsBuilder) =>
-{
-    var httpContextAccessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
-    optionsBuilder
-        .UseSqlServer(Configuration.GetConnectionString("DefaultConnection"))
-        .AddHubbleInterceptor(httpContextAccessor, "MyDatabase");
-});
-```
-
-### 3. Capturing Direct ADO.NET Queries
-
-There are two ways to capture ADO.NET queries that don't go through Entity Framework (like stored procedures executed directly):
-
-#### Option 1: Using GetTrackedConnection (recommended)
-
-This method is the simplest and most automatic, as any command created from the connection will be captured automatically:
-
-```csharp
-using Gabonet.Hubble.Extensions;
-using Microsoft.Data.SqlClient;
-using System.Data;
-
-public async Task<string> GetStoresProcedureById(string id)
-{
-    var response = new List<string>();
-
-    // Get a wrapped connection that automatically captures all commands
-    using (var connection = _sqlServerDbContext.GetTrackedConnection(_httpContextAccessor, "SQLServerDB"))
-    {
-        await connection.OpenAsync();
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "[dbo].[SP_DBO_GETVALUESBYID]";
-            command.CommandType = CommandType.StoredProcedure;
-            command.Parameters.Add(new SqlParameter("@ID", id));
-
-            // No special action needed, commands are captured automatically
-
-            using (var reader = await command.ExecuteReaderAsync())
-            {
-                while (await reader.ReadAsync())
-                {
-                    response.Add(reader["Response"].ToString());
-                    break;
-                }
-            }
-        }
-    }
-
-    return response.FirstOrDefault();
-}
-```
-
-#### Option 2: Manual capture with CaptureAdoNetCommand
-
-If you prefer more control or can't modify the existing code much, you can capture the command manually just before executing it:
-
-```csharp
-using Gabonet.Hubble.Extensions;
-using Microsoft.Data.SqlClient;
-using System.Data;
-
-public async Task<string> GetStoresProcedureById(string id)
-{
-    var response = new List<string>();
-
-    using (var connection = (SqlConnection)_sqlServerDbContext.Database.GetDbConnection())
-    {
-        await connection.OpenAsync();
-        using (var command = new SqlCommand("[dbo].[SP_DBO_GETVALUESBYID]", connection))
-        {
-            command.CommandType = CommandType.StoredProcedure;
-            command.Parameters.AddWithValue("@ID", id);
-            
-            // Capture the command before executing it
-            command.CaptureAdoNetCommand(_httpContextAccessor, "SQLServerDB");
-
-            using (var reader = await command.ExecuteReaderAsync())
-            {
-                while (await reader.ReadAsync())
-                {
-                    response.Add(reader["Response"].ToString());
-                    break;
-                }
-            }
-        }
-    }
-
-    return conditions.FirstOrDefault();
-}
-```
-
-### 4. Capturing MongoDB Queries
-
-For comprehensive MongoDB monitoring, you can implement a custom context that automatically tracks all queries:
-
-```csharp
-using MongoDB.Bson;
-using MongoDB.Driver;
-using Microsoft.AspNetCore.Http;
-using MongoDB.Driver.Core.Events;
-using Microsoft.Extensions.Logging;
-using Gabonet.Hubble.Models;
-using Gabonet.Hubble.Extensions;
-using Microsoft.Extensions.Configuration;
-
-public class MongoDbContext
-{
-    private readonly IMongoDatabase _database;
-    private readonly ILogger<MongoDbContext> _logger;
-    private readonly IHttpContextAccessor _httpContextAccessor;
-
-    // Your collections
-    public IMongoCollection<User> Users { get; private set; }
-    public IMongoCollection<Account> Accounts { get; private set; }
-    public IMongoCollection<Profile> Profiles { get; private set; }
-    // Other collections...
-
-    public MongoDbContext(
-        IConfiguration configuration, 
-        ILogger<MongoDbContext> logger,
-        IHttpContextAccessor httpContextAccessor
-    ) {
-        _logger = logger;
-        _httpContextAccessor = httpContextAccessor;
-        var mongoConnectionString = Environment.GetEnvironmentVariable("MONGO_CONNECTION_STRING");
-        var mongoDatabaseName = Environment.GetEnvironmentVariable("MONGO_DATABASE_NAME");
-
-        try
-        {
-            var settings = MongoClientSettings.FromConnectionString(mongoConnectionString);
-
-            // Configure MongoDB event subscription for Hubble monitoring
-            settings.ClusterConfigurator = cb =>
-            {
-                cb.Subscribe<CommandStartedEvent>(e =>
-                {
-                    _logger.LogInformation("Mongo Query: {CommandName} - {Command}", e.CommandName, e.Command.ToJson());
-                    
-                    // Capture the query for Hubble
-                    if (_httpContextAccessor.HttpContext != null)
-                    {
-                        var query = new DatabaseQueryLog(
-                            databaseType: "MongoDB",
-                            databaseName: mongoDatabaseName,
-                            query: e.Command.ToJson(),
-                            parameters: null,
-                            callerMethod: MongoDbExtensions.GetCallerMethod(),
-                            tableName: e.Command.GetCollectionName(),
-                            operationType: e.CommandName
-                        );
-                        
-                        _httpContextAccessor.HttpContext.AddDatabaseQuery(query);
-                    }
-                });
-            };
-
-            var client = new MongoClient(settings);
-            _database = client.GetDatabase(mongoDatabaseName);
-
-            // Initialize collections
-            Users = _database.GetCollection<User>("User");
-            Accounts = _database.GetCollection<Account>("Account");
-            Profiles = _database.GetCollection<Profile>("Profile");
-            // Initialize other collections...
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error initializing MongoDB context.");
-        }
-    }
-
-    public IMongoCollection<T> GetCollection<T>(string collectionName)
-    {
-        return _database.GetCollection<T>(collectionName);
-    }
-}
-```
-
-This approach provides detailed monitoring of all MongoDB operations, including:
-- Query content and command type
-- Name of the collection being accessed
-- Caller method information
-- Automatic integration with Hubble's HTTP request tracking
-
-### 5. Capturing ILogger Messages
-
-Hubble ahora puede capturar mensajes de ILogger y asociarlos automáticamente con las solicitudes HTTP a las que pertenecen, permitiendo una visión completa del flujo de ejecución.
-
-#### Integración automática con el flujo HTTP
-
-Una de las características más potentes de Hubble es la agrupación automática de mensajes de ILogger con sus solicitudes HTTP correspondientes:
-
-1. **Logs en contexto**: Los logs emitidos durante el procesamiento de una solicitud HTTP se asocian automáticamente con esa solicitud
-2. **Visualización integrada**: Al ver los detalles de una solicitud, también verás todos los logs generados durante su procesamiento
-3. **Visibilidad completa**: Esto te permite ver todo el ciclo de vida de una solicitud, desde controladores hasta servicios y repositorios
-
-#### Configuración (importante: orden de registro)
-
-Asegúrate de seguir este orden para configurar correctamente:
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-
-// 1. Primero añade los servicios de Hubble
-builder.Services.AddHubble(options =>
-{
-    options.ConnectionString = "mongodb://localhost:27017";
-    options.DatabaseName = "HubbleDB";
-    options.CaptureLoggerMessages = true; // Habilitar captura de ILogger
-    options.MinimumLogLevel = LogLevel.Information; // Nivel mínimo a capturar
-});
-
-// 2. Luego configura el logger de Hubble
+// Optional: capture ILogger messages and link them to the current request
 builder.Logging.AddHubbleLogging(LogLevel.Information);
 
 var app = builder.Build();
 
-// 3. Finalmente configura el middleware
-app.UseHubble();
+app.UseHubble(); // before UseRouting() so that every request is captured
+
+app.UseRouting();
+app.MapControllers();
+
+app.Run();
 ```
 
-#### Ejemplo en un controlador
+### 3. Open the dashboard
 
-No necesitas hacer nada especial en tu código. Las llamadas normales a ILogger se capturarán automáticamente:
+Browse to `https://your-app/hubble` (or the `BasePath` you configured).
+
+### Middleware order
+
+The position of `UseHubble()` matters:
 
 ```csharp
-[ApiController]
-[Route("api/[controller]")]
-public class UsersController : ControllerBase
+var app = builder.Build();
+
+// 1. Behind a reverse proxy / load balancer: restore the real client IP first,
+//    otherwise AllowedIps and the login lockout only ever see the proxy's address.
+app.UseForwardedHeaders();
+
+// 2. Global exception handler (optional). Placed before Hubble, it still receives the
+//    exception after Hubble has recorded it, because Hubble re-throws.
+app.UseExceptionHandler("/error");
+
+// 3. Hubble: capture middleware + dashboard.
+app.UseHubble();
+
+// 4. The rest of your pipeline.
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+```
+
+To trust forwarded headers safely, tell ASP.NET Core which proxies are yours:
+
+```csharp
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    private readonly ILogger<UsersController> _logger;
-    private readonly IUserService _userService;
-
-    public UsersController(ILogger<UsersController> logger, IUserService userService)
-    {
-        _logger = logger;
-        _userService = userService;
-    }
-
-    [HttpGet]
-    public async Task<IActionResult> GetUsers()
-    {
-        _logger.LogInformation("Obteniendo listado de usuarios"); // Este log se asociará a la solicitud HTTP
-        
-        try 
-        {
-            var users = await _userService.GetAllAsync();
-            _logger.LogInformation("Se encontraron {count} usuarios", users.Count); // También se asociará
-            return Ok(users);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error al obtener usuarios"); // Los errores también se asocian
-            return StatusCode(500, "Error interno del servidor");
-        }
-    }
-}
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownProxies.Add(IPAddress.Parse("10.0.0.10")); // your proxy
+});
 ```
 
-#### Visualización en la interfaz
+## Configuration
 
-En la interfaz de Hubble, ahora tendrás:
+Hubble can be configured in code or from `appsettings.json`.
 
-1. **Vista principal**: Un nuevo filtro para seleccionar tipos de logs (HTTP o ILogger)
-2. **Vista de detalle**: Una nueva sección "Logs de Aplicación Asociados" que muestra todos los logs de ILogger relacionados con esa solicitud HTTP
-3. **Códigos de colores**: Los logs se muestran con un código de colores según su nivel (información, advertencia, error, etc.)
-
-Con esta configuración, obtendrás automáticamente una traza completa de logs para cada solicitud HTTP, lo que facilita enormemente la depuración y el monitoreo de tu aplicación.
-
-### 6. Accessing the User Interface
-
-Once configured, you can access the Hubble user interface by navigating to:
-
-```
-https://your-application.com/hubble
-```
-
-### 7. Securing the Hubble UI with Authentication
-
-For sensitive environments, you can secure the Hubble UI with basic username and password authentication:
+### In code
 
 ```csharp
 builder.Services.AddHubble(options =>
 {
     options.ConnectionString = "mongodb://localhost:27017";
     options.DatabaseName = "HubbleDB";
-    
-    // Enable authentication
+    options.ServiceName = "Orders.Api";
+    options.BasePath = "/hubble";
+    options.TimeZoneId = "America/New_York";
+    options.IgnorePaths = new List<string> { "/health", "/metrics" };
+
+    options.EnableDataPrune = true; // MongoDB deletes logs older than MaxLogAgeHours (TTL index)
+    options.MaxLogAgeHours = 72;
+
     options.RequireAuthentication = true;
-    options.Username = "admin";
-    options.Password = "your_secure_password";
+    options.Username = builder.Configuration["Hubble:Username"]!;
+    options.Password = builder.Configuration["Hubble:Password"]!;
+    options.AllowDeleteAll = false;
+
+    options.Security.MaskBodyProperties = new List<string> { "password", "token", "creditCard", "cvv" };
+    options.Security.MaskRequestBodyProperties = new List<string> { "pin" };
+    options.Security.MaskResponseBodyProperties = new List<string> { "internalId" };
+    options.Security.MaskHeaders = new List<string> { "Authorization", "Cookie", "X-Api-Key" };
+    options.Security.AllowedIps = new List<string> { "127.0.0.1", "10.0.0.0/8" };
 });
 ```
 
-When authentication is enabled:
-- Users will be redirected to a login form when accessing Hubble
-- Session is maintained using a secure HTTP-only cookie
-- Sessions expire after 8 hours of inactivity
-- A logout option is provided in the UI
+### From appsettings.json
 
-For maximum security, consider:
-- Using a strong, unique password
-- Deploying your application with HTTPS enabled
-- Using environment variables for the username and password instead of hardcoding them
+```json
+{
+  "ConnectionStrings": {
+    "Hubble": "mongodb://hubble_user@mongo:27017/HubbleDB"
+  },
+  "Hubble": {
+    "ServiceName": "Orders.Api",
+    "BasePath": "/hubble",
+    "RequireAuthentication": true,
+    "Username": "admin",
+    "IgnorePaths": [ "/health", "/metrics", "/swagger" ],
+    "EnableDataPrune": true,
+    "MaxLogAgeHours": 72,
+    "AllowDeleteAll": false,
+    "Security": {
+      "MaskBodyProperties": [ "password", "token", "creditCard", "cvv" ],
+      "MaskRequestBodyProperties": [ "pin" ],
+      "MaskResponseBodyProperties": [ "internalId" ],
+      "MaskHeaders": [ "Authorization", "Cookie", "X-Api-Key" ],
+      "AllowedIps": [ "10.0.0.0/8" ]
+    }
+  }
+}
+```
 
 ```csharp
-// Using environment variables for credentials
-builder.Services.AddHubble(options =>
+builder.Services.AddHubble(
+    builder.Configuration.GetSection("Hubble"),
+    options =>
+    {
+        // Runs after the section is read: complete or override values here
+        options.ConnectionString = builder.Configuration.GetConnectionString("Hubble")!;
+        options.DatabaseName = "HubbleDB";
+    });
+```
+
+Lists in the section (`IgnorePaths`, `Security.MaskHeaders`, ...) **replace** the defaults instead of being appended to them. Every setting can also be placed in the section itself (`"ConnectionString"`, `"DatabaseName"`), in which case the second argument is optional.
+
+`HubbleOptions` is also registered as `IOptions<HubbleOptions>` if you need to read the effective configuration elsewhere.
+
+Keep the password out of the file. ASP.NET Core does **not** expand `${VARIABLES}` inside JSON; provide it through [user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets), a vault, or an environment variable using `__` as the section separator:
+
+```bash
+export Hubble__Password="a-long-random-password"
+```
+
+### Options reference
+
+| Option | Default | Description |
+|---|---|---|
+| `ConnectionString` | — | **Required.** MongoDB connection string. Unless it sets `serverSelectionTimeoutMS`, Hubble uses a 5-second server selection timeout. |
+| `DatabaseName` | — | **Required.** Database that stores the `HubbleLogs`, `HubbleStats` and `HubbleConfig` collections. |
+| `ServiceName` | `HubbleService` | Name stored with every log entry. |
+| `BasePath` | `/hubble` | Dashboard route. Matched by path segment (`/hubble` does not match `/hubblefoo`). Cannot be empty or `/`. |
+| `PrefixPath` | `""` | Prefix prepended to dashboard links and the session cookie path when the app is served under a sub-path by a proxy. |
+| `TimeZoneId` | `""` (UTC) | Time zone used to display timestamps (`TimeZoneInfo` id). |
+| `IgnorePaths` | `[]` | Path prefixes that are never captured. |
+| `IgnoreStaticFiles` | `true` | Skip common static file extensions. |
+| `CaptureHttpRequests` | `true` | Capture HTTP traffic. When `false`, requests pass through untouched. |
+| `CaptureLoggerMessages` | `true` | Capture `ILogger` messages (requires `AddHubbleLogging()`). |
+| `MinimumLogLevel` | `Information` | Minimum `ILogger` level captured, unless `AddHubbleLogging(level)` sets one explicitly. |
+| `EnableDiagnostics` | `false` | Write Hubble's internal errors to the console. |
+| `EnableDataPrune` | `false` | Automatic retention: MongoDB deletes logs older than `MaxLogAgeHours` through a TTL index managed by Hubble. |
+| `MaxLogAgeHours` | `24` | Retention in hours when `EnableDataPrune` is on (1 to 596,523). The app fails at startup if it is out of range. |
+| `DataPruneIntervalHours` | `1` | No longer used (MongoDB checks for expired logs every minute). Kept for compatibility. |
+| `HighlightNewServices` | `false` | Auto-refresh the list and highlight new entries. |
+| `HighlightDurationSeconds` | `5` | How long new entries stay highlighted. |
+| `RequireAuthentication` | `false` | Require a login for the dashboard and API. The app refuses to start if enabled with an empty `Username` or `Password`. |
+| `Username` / `Password` | `""` | Dashboard credentials. |
+| `AllowDeleteAll` | `true` | Allow deleting every log from the UI and API. |
+| `Security.MaskBodyProperties` | see source | JSON properties masked in request **and** response bodies. |
+| `Security.MaskRequestBodyProperties` | `[]` | Extra properties masked only in request bodies. |
+| `Security.MaskResponseBodyProperties` | `[]` | Extra properties masked only in response bodies. |
+| `Security.MaskHeaders` | `Authorization`, `X-Api-Key`, `Cookie` | Request headers stored as `*****`. |
+| `Security.AllowedIps` | `[]` | IPs / CIDR ranges (IPv4 and IPv6) allowed to reach the **dashboard and API**. Empty or `*` allows everyone. Never affects the rest of your application. |
+
+Invalid settings make the application **fail at startup** with a single message listing every problem (missing `ConnectionString` or `DatabaseName`, authentication without credentials, an unknown `TimeZoneId`, an out-of-range `MaxLogAgeHours`, ...), instead of running with a broken or insecure configuration.
+
+## Securing the dashboard
+
+Hubble stores request bodies, headers, SQL and log messages: treat the dashboard as an administrative tool that exposes sensitive data.
+
+### What Hubble enforces
+
+- **Authentication** (`RequireAuthentication = true`): an HTML login form for browsers and HTTP Basic authentication for API clients. Credentials are compared in constant time.
+- **Signed session cookie**: the `HubbleAuth` cookie is encrypted and signed with ASP.NET Core Data Protection, expires after 8 hours, is `HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS and scoped to the dashboard path. Changing the username or password invalidates existing sessions.
+- **Brute-force lockout**: 5 failed attempts from the same IP within 15 minutes lock that IP out for 15 minutes (`429`).
+- **CSRF protection**: every state-changing UI action is `POST`-only and requires an anti-forgery token; state-changing API calls require `Content-Type: application/json`.
+- **Output encoding**: all captured data is HTML-encoded before rendering, so payloads such as `<script>` in a request body are displayed as text.
+- **Response headers**: `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store` on every dashboard response.
+- **IP allow-list**: `Security.AllowedIps` restricts who can reach the dashboard and API.
+
+### What you must configure
+
+1. **Enable authentication** outside local development and load the password from a secret store.
+2. **Serve the app over HTTPS**, otherwise credentials and the session cookie travel in clear text.
+3. **Restrict by network** with `Security.AllowedIps` (VPN / office ranges), and call `UseForwardedHeaders()` before `UseHubble()` when behind a proxy.
+4. **Persist Data Protection keys when running more than one instance** (or when instances are recycled), so a session cookie issued by one instance is valid on the others:
+
+   ```csharp
+   builder.Services.AddDataProtection()
+       .SetApplicationName("Orders.Api")
+       .PersistKeysToFileSystem(new DirectoryInfo("/var/keys/orders-api")); // or Redis, Azure Blob, etc.
+   ```
+
+5. **Do not expose Hubble routes through a permissive CORS policy** (for example `SetIsOriginAllowed(_ => true).AllowCredentials()`), which would defeat the API's CSRF protection.
+6. Consider `AllowDeleteAll = false` in shared environments.
+
+## Capturing ILogger messages
+
+```csharp
+builder.Logging.AddHubbleLogging(); // uses options.MinimumLogLevel (Information by default)
+```
+
+Messages logged while a request is being processed are linked to it and appear in the **Loggers** section of the request detail page; messages logged outside a request are stored as standalone entries.
+
+Keep the volume under control with the standard logging filters, scoped to Hubble's provider:
+
+```csharp
+using Gabonet.Hubble.Logging;
+
+builder.Logging.AddHubbleLogging(LogLevel.Information);
+builder.Logging.AddFilter<HubbleLoggerProvider>("Microsoft", LogLevel.Warning);
+builder.Logging.AddFilter<HubbleLoggerProvider>("System", LogLevel.Warning);
+```
+
+`AddHubbleLogging()` depends on the services registered by `AddHubble()`. If you enable Hubble conditionally, register both (and `UseHubble()`) under the same condition.
+
+## Capturing database queries
+
+### Entity Framework Core
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
 {
-    // ... other options
-    options.RequireAuthentication = true;
-    options.Username = Environment.GetEnvironmentVariable("HUBBLE_USERNAME") ?? "admin";
-    options.Password = Environment.GetEnvironmentVariable("HUBBLE_PASSWORD") ?? "default_password";
+    var httpContextAccessor = serviceProvider.GetRequiredService<IHttpContextAccessor>();
+    options
+        .UseSqlServer(builder.Configuration.GetConnectionString("Default"))
+        .AddHubbleInterceptor(httpContextAccessor, "AppDatabase");
 });
 ```
 
-### Masking Sensitive Data in Custom Logs
+### ADO.NET
 
-Hubble provides a utility to mask sensitive data in your own logs, using the same masking configuration that applies to HTTP requests and responses.
+Wrap the connection so every command is captured:
 
-#### Using the Masking Helper
+```csharp
+using var connection = dbContext.GetTrackedConnection(httpContextAccessor, "AppDatabase");
+await connection.OpenAsync();
+
+using var command = connection.CreateCommand();
+command.CommandText = "[dbo].[GetOrderById]";
+command.CommandType = CommandType.StoredProcedure;
+command.Parameters.Add(new SqlParameter("@Id", id));
+
+using var reader = await command.ExecuteReaderAsync();
+```
+
+Or capture a single command explicitly before executing it:
+
+```csharp
+command.CaptureAdoNetCommand(httpContextAccessor, "AppDatabase");
+```
+
+### MongoDB
+
+Subscribe to the driver's command events in your own `MongoClient`:
+
+```csharp
+var settings = MongoClientSettings.FromConnectionString(connectionString);
+settings.ClusterConfigurator = cb =>
+{
+    cb.Subscribe<CommandStartedEvent>(e =>
+    {
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext == null) return;
+
+        httpContext.AddDatabaseQuery(new DatabaseQueryLog(
+            databaseType: "MongoDB",
+            databaseName: databaseName,
+            query: e.Command.ToJson(),
+            parameters: null,
+            callerMethod: MongoDbExtensions.GetCallerMethod(),
+            tableName: e.Command.GetCollectionName(),
+            operationType: e.CommandName));
+    });
+};
+var client = new MongoClient(settings);
+```
+
+> SQL parameters and MongoDB commands are stored **as executed, without masking**. Avoid capturing queries that carry secrets, or exclude those endpoints with `IgnorePaths`.
+
+## Masking sensitive data
+
+Masking applies to JSON request and response bodies and to request headers:
+
+- Property matching is **case-insensitive** and **recursive** (nested objects and arrays).
+- `MaskBodyProperties` applies to both directions; `MaskRequestBodyProperties` and `MaskResponseBodyProperties` add direction-specific properties.
+- Masked values are replaced with `*****` before anything is written to MongoDB.
+
+Bodies that are not JSON (form posts, plain text, query strings) are **not** masked; see [Known limitations](#known-limitations).
+
+### Masking your own logs
+
+`HubbleMaskingHelper` reuses the same configuration:
 
 ```csharp
 using Gabonet.Hubble.Utilities;
 
-public class PlayerService
-{
-    private readonly ILogger<PlayerService> _logger;
-    private readonly IPlayerRepository _playerRepository;
+_logger.LogInformation("Creating user: {User}", HubbleMaskingHelper.SerializeMasked(userDto));
+// Creating user: {"Name":"John Doe","Email":"john@example.com","Password":"*****"}
 
-    public PlayerService(
-        ILogger<PlayerService> logger,
-        IPlayerRepository playerRepository)
-    {
-        _logger = logger;
-        _playerRepository = playerRepository;
-    }
+// Extra properties for a single call, optional indentation
+var json = HubbleMaskingHelper.SerializeMasked(order, new List<string> { "iban" }, indent: true);
 
-    public async Task<PlayerDto> CreatePlayerAsync(PlayerDto playerDto)
-    {
-        var player = MapToEntity(playerDto);
-        player.Id = Guid.NewGuid();
-        
-        // Use HubbleMaskingHelper to serialize and mask sensitive data
-        _logger.LogInformation("Creating player: {Player}", 
-            HubbleMaskingHelper.SerializeMasked(playerDto));
-        
-        var createdPlayer = await _playerRepository.AddAsync(player);
-        
-        // Also works with entity objects
-        _logger.LogInformation("Player created: {Player}", 
-            HubbleMaskingHelper.SerializeMasked(createdPlayer));
-        
-        return MapToDto(createdPlayer);
-    }
-}
+// Already-serialized JSON
+var masked = HubbleMaskingHelper.MaskJson(rawJson);
 ```
 
-#### Available Methods
+## How capture works (and what happens if MongoDB is down)
 
-**`SerializeMasked<T>(T obj, List<string>? additionalMaskProperties = null, bool indent = false)`**
+Hubble never makes your application wait for MongoDB:
 
-Serializes an object to JSON and masks sensitive properties according to Hubble's configuration.
+1. When a request arrives, Hubble creates the log entry **in memory** (its id is generated locally), so `ILogger` messages can be linked to it immediately.
+2. When the request finishes, the entry is placed in a bounded in-memory queue (up to 5,000 entries). `ILogger` messages go to the same queue.
+3. A background service drains the queue and inserts the entries in batches of up to 200.
 
-```csharp
-// Basic usage
-var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject);
+If MongoDB is slow or unavailable:
 
-// With additional properties to mask
-var maskedJson = HubbleMaskingHelper.SerializeMasked(
-    myObject, 
-    new List<string> { "customField", "secretData" }
-);
+- Your endpoints and application startup are unaffected.
+- The first failed write prints a `[Hubble]` warning to the console (later failures only with `EnableDiagnostics`), and a recovery message is printed when MongoDB comes back.
+- While MongoDB is down, new entries are **dropped** once the queue is full, instead of growing memory without limit.
+- On shutdown Hubble tries to flush pending entries for up to 5 seconds (skipped if MongoDB is already known to be down).
+- The dashboard itself needs MongoDB; it reports an error after the server selection timeout (5 seconds by default).
 
-// With indented JSON for better readability
-var maskedJson = HubbleMaskingHelper.SerializeMasked(myObject, indent: true);
+Entries appear in the dashboard a few milliseconds after the request completes.
+
+## Data retention and MongoDB setup
+
+Give Hubble its **own database** and a dedicated MongoDB user with `readWrite` on that database only. Hubble creates its own `MongoClient` from `ConnectionString` and does not register it in dependency injection, so it is fully independent from any `IMongoClient` your application uses. Hubble uses three collections: `HubbleLogs`, `HubbleStats` and `HubbleConfig`.
+
+### Indexes and retention are managed for you
+
+At startup a background service prepares the `HubbleLogs` collection, without delaying your application:
+
+| Index | Keys | Purpose |
+|---|---|---|
+| `hubble_timestamp` | `{ timestamp: 1 }` | Sorts the dashboard list. With `EnableDataPrune = true` it is a **TTL index**: MongoDB deletes logs older than `MaxLogAgeHours`. |
+| `hubble_related_request` | `{ relatedRequestId: 1 }` (partial) | Loads the `ILogger` entries shown in a request's detail page. |
+
+- Retention is enforced by MongoDB itself (its TTL monitor runs about once a minute), so there is no prune job in your application and it keeps working even if the app is stopped.
+- Changing `MaxLogAgeHours` or toggling `EnableDataPrune` updates the index on the next startup. The index is dropped and recreated, which only needs the `readWrite` role.
+- Indexes you created by hand are respected: an existing index on the same keys is reused. The only exception is a TTL on `{ timestamp: 1 }` that conflicts with `EnableDataPrune = true`, which is replaced by Hubble's.
+- If MongoDB is unreachable, the service retries every 30 seconds. The result is shown under **Índices de MongoDB** on the dashboard's `/config` page.
+- The dashboard's manual prune (`POST /api/prune`) is still available and uses the configured `MaxLogAgeHours`.
+
+## Healthy implementation checklist
+
+- [ ] `UseHubble()` is registered early, after `UseForwardedHeaders()` and before `UseRouting()`.
+- [ ] Health checks, metrics, Swagger, file downloads, SSE/streaming and other high-volume endpoints are in `IgnorePaths`.
+- [ ] `RequireAuthentication` is on outside local development, with the password loaded from a secret store.
+- [ ] The app is served over HTTPS.
+- [ ] `Security.AllowedIps` limits the dashboard to trusted networks.
+- [ ] Data Protection keys are persisted and shared when running multiple instances.
+- [ ] Masking lists cover the sensitive fields of **your** domain (the defaults are only a starting point).
+- [ ] Retention is enabled (`EnableDataPrune` + `MaxLogAgeHours`) and `/config` reports the MongoDB indexes as created.
+- [ ] Hubble uses its own MongoDB database and least-privilege credentials.
+- [ ] `ILogger` capture is filtered so framework noise does not flood the dashboard.
+
+## Web UI and REST API
+
+| Route (relative to `BasePath`) | Method | Description |
+|---|---|---|
+| `/` | GET | Log list with filters and pagination |
+| `/detail/{id}` | GET | Request detail, related `ILogger` messages and queries |
+| `/config` | GET | Statistics and effective configuration |
+| `/delete-all` | POST | Delete every log (anti-forgery token required; honours `AllowDeleteAll`) |
+| `/login`, `/logout` | POST / GET | Session management when authentication is enabled |
+| `/api/...` | GET / POST / DELETE | JSON API |
+
+The JSON API (logs, details, configuration, prune, statistics) is documented in [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md). API clients authenticate with HTTP Basic:
+
+```bash
+curl -u admin:password "https://your-app/hubble/api/logs?pageSize=20"
+curl -u admin:password -X POST -H "Content-Type: application/json" "https://your-app/hubble/api/prune"
 ```
 
-**`MaskJson(string jsonString, List<string>? additionalMaskProperties = null)`**
+`pageSize` is capped at 200.
 
-Masks sensitive properties in an already serialized JSON string.
+## Building from source
 
-```csharp
-var jsonString = JsonSerializer.Serialize(myObject);
-var maskedJson = HubbleMaskingHelper.MaskJson(jsonString);
+### Prerequisites
 
-// With additional mask properties
-var maskedJson = HubbleMaskingHelper.MaskJson(
-    jsonString, 
-    new List<string> { "customField" }
-);
+- .NET SDK 8.0 or later. Running the tests for every target also needs the .NET 6 and .NET 8 runtimes.
+- A MongoDB instance for manual testing (for example `docker run -d -p 27017:27017 mongo:7`).
+
+### Build and pack
+
+```bash
+git clone https://github.com/GaboIV/Gabonet.Hubble.git
+cd Gabonet.Hubble
+dotnet build src/src.csproj -c Release
 ```
 
-#### Features
+The project has `GeneratePackageOnBuild` enabled, so a Release build also produces the `.nupkg` under `src/bin/Release`. To produce it in a known folder:
 
-- **Automatic**: Uses Hubble's `MaskBodyProperties`, `MaskRequestBodyProperties`, and `MaskResponseBodyProperties` configuration.
-- **Case-Insensitive**: Property matching is case-insensitive.
-- **Recursive**: Masks properties in nested objects and arrays.
-- **Additional Properties**: Allows adding extra properties to mask at runtime.
-- **Safe**: If Hubble is not initialized or errors occur, returns unmasked JSON or an error message.
-
-#### Example with Sensitive Data
-
-```csharp
-public class UserDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; }
-    public string Email { get; set; }
-    public string Password { get; set; }  // Sensitive
-    public string Token { get; set; }     // Sensitive
-    public string CreditCard { get; set; } // Sensitive
-}
-
-var user = new UserDto 
-{
-    Id = Guid.NewGuid(),
-    Name = "John Doe",
-    Email = "john@example.com",
-    Password = "SecretPass123",
-    Token = "abc123xyz",
-    CreditCard = "4111111111111111"
-};
-
-// Log with masking
-_logger.LogInformation("User data: {User}", 
-    HubbleMaskingHelper.SerializeMasked(user));
-
-// Output: User data: {"Id":"...","Name":"John Doe","Email":"john@example.com","Password":"*****","Token":"*****","CreditCard":"*****"}
+```bash
+dotnet pack src/src.csproj -c Release -o ./artifacts
 ```
 
-## Configuration Options
+### Running the tests
 
-You can customize Hubble's behavior with the following options:
-
-```csharp
-builder.Services.AddHubble(options =>
-{
-    // Required: MongoDB connection string
-    options.ConnectionString = "mongodb://localhost:27017";
-    
-    // Required: Database name
-    options.DatabaseName = "HubbleDB";
-    
-    // General Settings
-    options.ServiceName = "MyService";
-    options.BasePath = "/monitoring";
-    options.TimeZoneId = "Eastern Standard Time";
-    options.EnableDiagnostics = false;
-    
-    // Data Capture Settings
-    options.CaptureLoggerMessages = true;
-    options.CaptureHttpRequests = true;
-    options.IgnoreStaticFiles = true;
-    
-    // Paths to ignore
-    options.IgnorePaths = new List<string> { "/health", "/metrics" };
-    
-    // Security Configuration
-    options.Security = new SecurityConfiguration
-    {
-        // Data Masking (Case-Insensitive)
-        // Applies to both Request and Response bodies
-        MaskBodyProperties = new List<string> { "password", "token", "creditCard" },
-        
-        // Additional properties to mask ONLY in the Request body
-        MaskRequestBodyProperties = new List<string> { "pin", "secretKey" },
-
-        // Additional properties to mask ONLY in the Response body
-        MaskResponseBodyProperties = new List<string> { "internalId", "secretData" },
-        
-        // Headers to mask
-        MaskHeaders = new List<string> { "Authorization", "X-Api-Key", "Cookie" },
-        
-        // IP Filtering (CIDR supported)
-        // Leave empty or use "*" to allow all IPs
-        AllowedIps = new List<string> { "127.0.0.1", "10.0.0.0/8" }
-    };
-    
-    // Automatic Data Pruning
-    options.EnableDataPrune = true;
-    options.DataPruneIntervalHours = 24; // Run every 24 hours
-    options.MaxLogAgeHours = 72;         // Keep logs for 3 days
-    
-    // UI Settings
-    options.HighlightNewServices = true;
-    options.HighlightDurationSeconds = 10;
-    
-    // Authentication
-    options.RequireAuthentication = true;
-    options.Username = "admin";
-    options.Password = "secure_password";
-});
+```bash
+dotnet test
 ```
 
-### Security Features
+The suite runs without any external service. Four integration tests (indexes, TTL and the full capture pipeline) need a real MongoDB and are reported as **skipped** unless the `HUBBLE_TEST_MONGODB` environment variable points to one. Each of them uses its own temporary database and drops it afterwards.
 
-#### Data Masking
-Hubble helps protect sensitive information in your logs:
-- **Case-Insensitive**: Masking is case-insensitive (e.g., "password", "Password", "PASSWORD" will all be masked).
-- **Request/Response Body**: `MaskBodyProperties` applies to both request and response bodies.
-- **Request Specific**: `MaskRequestBodyProperties` allows you to define fields that should only be masked in the request.
-- **Response Specific**: `MaskResponseBodyProperties` allows you to define fields that should only be masked in the response.
-- **Headers**: `MaskHeaders` protects sensitive headers like authorization tokens.
+```bash
+docker run -d --name hubble-test-mongo -p 27017:27017 mongo:7
+HUBBLE_TEST_MONGODB=mongodb://localhost:27017 dotnet test
+```
 
-#### IP Access Control
-You can restrict access to the Hubble dashboard:
-- **Empty List**: If `AllowedIps` is empty, access is granted to **all** IPs.
-- **Wildcard**: If the list contains `*`, access is granted to **all** IPs.
-- **CIDR**: Supports CIDR notation for IP ranges (e.g., `192.168.1.0/24`).
-- **Specific IPs**: Supports individual IPs (e.g., `127.0.0.1`).
+### Testing a local build in another application
+
+```bash
+dotnet add package Gabonet.Hubble --source /path/to/Gabonet.Hubble/artifacts
+```
+
+Or reference the project directly while developing:
+
+```xml
+<ProjectReference Include="..\Gabonet.Hubble\src\src.csproj" />
+```
+
+### Repository layout
+
+| Path | Content |
+|---|---|
+| `src/Middleware` | Capture middleware and `HubbleOptions` |
+| `src/BackgroundServices` | Background log writer and storage initializer (indexes, TTL retention) |
+| `src/UI` | Dashboard middleware, HTML rendering and API models |
+| `src/Security` | IP allow-list, login throttling, session tokens, HTML encoding |
+| `src/Services` | Log queue, MongoDB-backed log and statistics services |
+| `src/Logging` | `ILogger` provider |
+| `src/Extensions` | Service registration, EF Core / ADO.NET capture, MongoDB helpers |
+| `src/Utilities` | `HubbleMaskingHelper` |
+| `docs/` | API reference and masking guide |
+| `examples/` | Sample `Program.cs`, `appsettings.json` and authentication guide |
+| `tests/Gabonet.Hubble.Tests` | xUnit test suite (security, capture, resilience, options, MongoDB integration) |
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Dashboard returns `403 Access denied: IP not allowed` | Your IP is not in `Security.AllowedIps`. Behind a proxy, configure `UseForwardedHeaders()` before `UseHubble()`. |
+| Login returns `429` | Too many failed attempts from your IP. Wait 15 minutes. |
+| "Invalid or missing anti-forgery token" | The page was open too long or cookies are blocked. Reload the page and retry. |
+| Logged out after a deploy or on another instance | Data Protection keys are not persisted/shared. See [Securing the dashboard](#securing-the-dashboard). |
+| App fails at startup with "RequireAuthentication está activado…" | Authentication is enabled with an empty username or password. Provide both. |
+| API returns `415` | `POST` requests must send `Content-Type: application/json`. |
+| No `ILogger` entries under a request | Check `AddHubbleLogging()` is registered, the level/filters allow the message, and that it was logged during the request. |
+| Dashboard pages are slow | Check on `/config` that the MongoDB indexes are created, and enable retention so the collection does not grow forever. |
+| `[Hubble] No se pudieron preparar los índices de MongoDB` in the console | MongoDB was unreachable at startup or the user lacks `readWrite`. Hubble retries every 30 seconds; the app is not affected. |
+| `[Hubble] No se pudieron guardar N logs en MongoDB` in the console | MongoDB is unreachable from the app. Your application keeps working; logs produced meanwhile are dropped. Check the connection string and network. |
+
+## Known limitations
+
+These are tracked for upcoming releases. Plan around them today:
+
+- **Response buffering**: every captured response is buffered in memory. Add streaming endpoints, server-sent events and large downloads to `IgnorePaths`.
+- **ILogger provider cost**: each captured message walks the stack trace to find its source. Use filters to limit volume.
+- **Dashboard configuration page is read-only**: the effective configuration comes from code / `appsettings.json`.
+- **Masking scope**: only JSON bodies and request headers are masked; query strings, form posts, SQL parameters and `ILogger` messages are stored as-is.
+
+## Upgrade notes
+
+This release hardens the dashboard and contains **breaking changes**:
+
+- `Security.AllowedIps` now applies **only** to the dashboard and API. Previously it was evaluated for every request and could block the whole application.
+- When configuring from `appsettings.json`, `Security.AllowedIps` no longer defaults to `127.0.0.1`; an empty list allows any IP.
+- `Security.MaskRequestBodyProperties` and `Security.MaskResponseBodyProperties` are now read from `appsettings.json`.
+- `GET /api/prune` and `GET /api/recalculate-stats` were replaced by `POST` (with `Content-Type: application/json`). Every `POST` to the API now requires that content type.
+- `/delete-all`, `/run-prune`, `/recalculate-stats` and the `/save-*` routes only accept `POST` with an anti-forgery token.
+- Session cookies issued by previous versions are no longer accepted; users must log in again.
+- The application fails at startup if `RequireAuthentication` is enabled with an empty username or password, or if `BasePath` is empty or `/`.
+- The package now uses the shared ASP.NET Core framework (`Microsoft.AspNetCore.App`) instead of the deprecated `Microsoft.AspNetCore.*` 2.2 packages, and registers Data Protection and Antiforgery services.
+- `HubbleController`'s constructor now also requires `IAntiforgery` and `IHttpContextAccessor` (both registered by `AddHubble()`).
+- The logout button is only shown when authentication is enabled.
+- Captured logs are written asynchronously in batches by a hosted service instead of inline in each request. Requests no longer wait for MongoDB, and logs are dropped (not queued forever) while MongoDB is unavailable.
+- `HubbleMiddleware` now takes `HubbleOptions` and `HubbleLogQueue`; `HubbleLoggerProvider` now takes `HubbleLogQueue`, `IHttpContextAccessor` and `HubbleOptions` (the constructors based on `IHubbleService` were removed). Both are created for you by `UseHubble()` / `AddHubbleLogging()`.
+- Retention is now enforced by a MongoDB TTL index that Hubble creates and maintains. `HubbleDataPruneManager` and `DataPruneService` were removed: nothing deletes logs from inside your application anymore, and `DataPruneIntervalHours` is ignored.
+- Hubble now creates its indexes at startup (`hubble_timestamp`, `hubble_related_request`). Indexes created by hand from the previous README are reused, except a `{ timestamp: 1 }` TTL with a different age when `EnableDataPrune` is on, which is replaced.
+- The application fails at startup if `EnableDataPrune` is on and `MaxLogAgeHours` is outside 1–596,523.
+- The `/config` page shows the effective retention settings and the index status instead of the values stored in MongoDB on first run, and the manual prune uses the configured `MaxLogAgeHours`.
+- `HubbleStatsService` no longer queries MongoDB in its constructor, and neither the prune service nor the log writer delays application startup.
+- Hubble's MongoDB client defaults to a 5-second server selection timeout unless the connection string sets `serverSelectionTimeoutMS`.
+- `AddHubble()` no longer registers an `IMongoClient` in the service collection. Hubble keeps its own private client, so it can no longer replace the client your application registers for its own data (previously, whichever registration came last won). If your code resolved `IMongoClient` from DI only because Hubble registered it, register your own client explicitly.
+- `CaptureHttpRequests = false` now fully disables HTTP capture, and request logs now include the client IP address.
+- Log categories starting with `Gabonet.Hubble` are no longer captured by the `ILogger` provider.
+- **Single options class.** `HubbleOptions` (namespace `Gabonet.Hubble.Middleware`) is now the only configuration type and includes `ConnectionString`, `DatabaseName` and `MinimumLogLevel`. `HubbleConfiguration`, `HubbleAuthConfiguration` and the duplicate `Gabonet.Hubble.Models.SecurityConfiguration` were removed. Code using `AddHubble(options => { ... })` keeps compiling unchanged.
+- New `AddHubble(IConfigurationSection, Action<HubbleOptions>?)` overload based on the standard configuration binder; every option can now be set from `appsettings.json` and from code (previously some options were only available in one of them).
+- `AddHubble(connectionString, databaseName, ...)` and `AddHubble(IConfiguration, connectionString, databaseName, sectionName)` still work but are marked `[Obsolete]`. The former now also registers the statistics service, so the `/config` page works with it.
+- All registrations validate the options and fail at startup with every error listed. A `TimeZoneId` that does not exist on the machine is now an error instead of silently falling back to UTC.
+- `CaptureLoggerMessages` (default now `true`) and `MinimumLogLevel` are honoured. `AddHubbleLogging()` without arguments uses `MinimumLogLevel`; passing a level still takes precedence.
+- The `/config` page shows the effective configuration (service, database, time zone, capture settings, ignored paths) instead of values stored in MongoDB on first run or read from undocumented `HUBBLE_*` environment variables.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Released under the MIT License.
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or pull request for suggestions or improvements.
-
----
-
-Developed by Gabonet
+Issues and pull requests are welcome.

@@ -2,7 +2,11 @@ namespace Gabonet.Hubble.UI;
 
 using Gabonet.Hubble.Interfaces;
 using Gabonet.Hubble.Models;
+using Gabonet.Hubble.Security;
+using Gabonet.Hubble.Services;
 using Gabonet.Hubble.UI.Models;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -21,19 +25,31 @@ public class HubbleController
     private readonly string _prefixPath;
     private readonly Middleware.HubbleOptions _options;
     private readonly IHubbleStatsService? _statsService;
+    private readonly IAntiforgery _antiforgery;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly HubbleStorageStatus? _storageStatus;
 
     /// <summary>
     /// Constructor del controlador de Hubble.
     /// </summary>
     /// <param name="hubbleService">Servicio de Hubble</param>
     /// <param name="options">Opciones de configuración de Hubble</param>
+    /// <param name="antiforgery">Servicio antiforgery para los formularios que modifican datos</param>
+    /// <param name="httpContextAccessor">Acceso al contexto HTTP actual</param>
     /// <param name="statsService">Servicio de estadísticas</param>
+    /// <param name="storageStatus">Estado de los índices y la retención en MongoDB</param>
     public HubbleController(
         IHubbleService hubbleService,
         Middleware.HubbleOptions options,
-        IHubbleStatsService? statsService = null)
+        IAntiforgery antiforgery,
+        IHttpContextAccessor httpContextAccessor,
+        IHubbleStatsService? statsService = null,
+        HubbleStorageStatus? storageStatus = null)
     {
+        _storageStatus = storageStatus;
         _hubbleService = hubbleService;
+        _antiforgery = antiforgery;
+        _httpContextAccessor = httpContextAccessor;
         _version = GetAssemblyVersion();
         _basePath = options.BasePath.TrimEnd('/');
         _prefixPath = options.PrefixPath.TrimEnd('/');
@@ -114,9 +130,8 @@ public class HubbleController
         var logs = await _hubbleService.GetFilteredLogsWithRelatedAsync(method, url, excludeRelatedLogs, page, pageSize);
 
         // Filtrar por grupo de códigos de estado si se especifica
-        if (!string.IsNullOrEmpty(statusGroup))
+        if (!string.IsNullOrEmpty(statusGroup) && int.TryParse(statusGroup, out int statusBase))
         {
-            int statusBase = int.Parse(statusGroup);
             logs = logs.Where(log => log.StatusCode >= statusBase && log.StatusCode < statusBase + 100).ToList();
         }
 
@@ -150,7 +165,7 @@ public class HubbleController
         //     html += "<div class='live-indicator'>Actualización en tiempo real <span id='reload-counter'>3</span>s</div>";
         // }
         html += $"<a href='{_prefixPath}{_basePath}/config' class='btn primary'>Configuración</a>";
-        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += LogoutButton();
         html += "</div>";
         html += "</div>";
 
@@ -183,7 +198,7 @@ public class HubbleController
         html += "</div>";
 
         // Filtro de URL
-        html += $"<input type='text' name='url' placeholder='URL' value='{url}' class='input-field'>";
+        html += $"<input type='text' name='url' placeholder='URL' value='{E(url)}' class='input-field'>";
 
         // Selector de grupos de estado
         html += "<div class='select-wrapper'>";
@@ -213,7 +228,10 @@ public class HubbleController
         // Show delete all button only if allowed
         if (_options.AllowDeleteAll)
         {
-            html += $"<button onclick=\"if(confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.')) {{ window.location.href='{_prefixPath}{_basePath}/delete-all'; }}\" class='btn danger'>Eliminar todos</button>";
+            html += $"<form method='post' action='{_prefixPath}{_basePath}/delete-all' style='margin: 0;' onsubmit=\"return confirm('¿Está seguro que desea eliminar todos los logs? Esta acción no se puede deshacer.');\">";
+            html += AntiforgeryField();
+            html += "<button type='submit' class='btn danger'>Eliminar todos</button>";
+            html += "</form>";
         }
 
         html += "</div>";
@@ -271,7 +289,7 @@ public class HubbleController
             if (isILoggerEntry)
             {
                 // Para logs de ILogger, mostrar el nivel de log (ActionName contiene el nivel)
-                html += $"<td><span class='log-level {log.ActionName.ToLower()}'>{log.ActionName}</span></td>";
+                html += $"<td><span class='log-level {E(log.ActionName.ToLower())}'>{E(log.ActionName)}</span></td>";
             }
             else
             {
@@ -279,24 +297,24 @@ public class HubbleController
                 html += $"<td>HTTP</td>";
             }
 
-            html += $"<td>{log.Method}</td>";
+            html += $"<td>{E(log.Method)}</td>";
 
             // Mostrar URL para HTTP o categoría para logs
             if (isILoggerEntry)
             {
                 // RequestData contiene la categoría del logger
-                html += $"<td class='url-cell'>{log.RequestData}</td>";
+                html += $"<td class='url-cell'>{E(log.RequestData)}</td>";
             }
             else
             {
                 // Mostrar URL y QueryParams en una sola línea
                 html += "<td class='url-cell'>";
-                html += $"<div class='url-path'>{log.HttpUrl}</div>";
+                html += $"<div class='url-path'>{E(log.HttpUrl)}</div>";
 
                 // Mostrar QueryParams si no están vacíos
                 if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
                 {
-                    html += $"<div class='url-params'>{log.QueryParams}</div>";
+                    html += $"<div class='url-params'>{E(log.QueryParams)}</div>";
                 }
 
                 html += "</td>";
@@ -308,11 +326,11 @@ public class HubbleController
             // Añadir la etiqueta "NUEVO" para servicios resaltados en la columna de acciones
             if (highlightClass.Contains("new-service") && !string.IsNullOrEmpty(log.ServiceName))
             {
-                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{log.Id}' class='btn small'>Ver</a>♾️</td>";
+                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{Uri.EscapeDataString(log.Id ?? string.Empty)}' class='btn small'>Ver</a>♾️</td>";
             }
             else
             {
-                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{log.Id}' class='btn small'>Ver</a></td>";
+                html += $"<td><a href='{_prefixPath}{_basePath}/detail/{Uri.EscapeDataString(log.Id ?? string.Empty)}' class='btn small'>Ver</a></td>";
             }
 
             html += "</tr>";
@@ -335,7 +353,7 @@ public class HubbleController
         // Botón de primera página
         if (page > 1)
         {
-            html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Primera página'><span class='pagination-icon'>«</span></a>";
+            html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Primera página'><span class='pagination-icon'>«</span></a>";
         }
         else
         {
@@ -345,7 +363,7 @@ public class HubbleController
         // Botón página anterior
         if (page > 1)
         {
-            html += $"<a href='?page={page - 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Página anterior'><span class='pagination-icon'>‹</span></a>";
+            html += $"<a href='{PageLink(page - 1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Página anterior'><span class='pagination-icon'>‹</span></a>";
         }
         else
         {
@@ -373,12 +391,12 @@ public class HubbleController
         {
             if (startPage > 2)
             {
-                html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>1</a>";
+                html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='page-number'>1</a>";
                 html += "<span class='page-ellipsis'>...</span>";
             }
             else if (startPage == 2)
             {
-                html += $"<a href='?page=1&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>1</a>";
+                html += $"<a href='{PageLink(1, pageSize, method, url, statusGroup, logType)}' class='page-number'>1</a>";
             }
         }
 
@@ -391,7 +409,7 @@ public class HubbleController
             }
             else
             {
-                html += $"<a href='?page={i}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{i}</a>";
+                html += $"<a href='{PageLink(i, pageSize, method, url, statusGroup, logType)}' class='page-number'>{i}</a>";
             }
         }
 
@@ -401,11 +419,11 @@ public class HubbleController
             if (endPage < totalPages - 1)
             {
                 html += "<span class='page-ellipsis'>...</span>";
-                html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{totalPages}</a>";
+                html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='page-number'>{totalPages}</a>";
             }
             else if (endPage == totalPages - 1)
             {
-                html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='page-number'>{totalPages}</a>";
+                html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='page-number'>{totalPages}</a>";
             }
         }
 
@@ -414,7 +432,7 @@ public class HubbleController
         // Botón página siguiente
         if (page < totalPages)
         {
-            html += $"<a href='?page={page + 1}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Página siguiente'><span class='pagination-icon'>›</span></a>";
+            html += $"<a href='{PageLink(page + 1, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Página siguiente'><span class='pagination-icon'>›</span></a>";
         }
         else
         {
@@ -424,7 +442,7 @@ public class HubbleController
         // Botón de última página
         if (page < totalPages)
         {
-            html += $"<a href='?page={totalPages}&pageSize={pageSize}&method={method}&url={url}&statusGroup={statusGroup}&logType={logType}' class='btn pagination-btn' title='Última página'><span class='pagination-icon'>»</span></a>";
+            html += $"<a href='{PageLink(totalPages, pageSize, method, url, statusGroup, logType)}' class='btn pagination-btn' title='Última página'><span class='pagination-icon'>»</span></a>";
         }
         else
         {
@@ -518,7 +536,7 @@ public class HubbleController
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += LogoutButton();
         html += "</div>";
         html += "</div>";
 
@@ -604,9 +622,9 @@ public class HubbleController
         html += "<div class='card-content'><div class='card-content-inner'>";
         html += "<div class='info-grid'>";
         html += $"<div class='info-item'><span>Fecha/Hora:</span> {log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")}</div>";
-        html += $"<div class='info-item'><span>Método:</span> {log.Method}</div>";
-        html += $"<div class='info-item'><span>Controlador:</span> {log.ControllerName}</div>";
-        html += $"<div class='info-item'><span>Acción:</span> {log.ActionName}</div>";
+        html += $"<div class='info-item'><span>Método:</span> {E(log.Method)}</div>";
+        html += $"<div class='info-item'><span>Controlador:</span> {E(log.ControllerName)}</div>";
+        html += $"<div class='info-item'><span>Acción:</span> {E(log.ActionName)}</div>";
         html += $"<div class='info-item'><span>Estado:</span> <span class='{(log.IsError || log.StatusCode >= 400 ? "error-text" : "success-text")}'>{log.StatusCode}</span></div>";
         html += $"<div class='info-item'><span>Duración:</span> {log.ExecutionTime} ms</div>";
         html += "</div>";
@@ -614,12 +632,12 @@ public class HubbleController
         // URL con QueryParams en una línea completa
         html += "<div class='url-item'>";
         html += "<div class='url-label'>URL:</div>";
-        html += $"<div class='url-value'>{log.HttpUrl}</div>";
+        html += $"<div class='url-value'>{E(log.HttpUrl)}</div>";
 
         // Mostrar QueryParams si no están vacíos
         if (!string.IsNullOrEmpty(log.QueryParams) && log.QueryParams != "?")
         {
-            html += $"<div class='url-params-line'>{log.QueryParams}</div>";
+            html += $"<div class='url-params-line'>{E(log.QueryParams)}</div>";
         }
 
         html += "</div>";
@@ -633,12 +651,12 @@ public class HubbleController
             html += "<div class='card error-card'>";
             html += "<div class='card-header collapsed'><h2>Error</h2></div>";
             html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{log.ErrorMessage}</div>";
+            html += $"<div class='code-block'>{E(log.ErrorMessage)}</div>";
 
             if (!string.IsNullOrEmpty(log.StackTrace))
             {
                 html += "<h3>Stack Trace</h3>";
-                html += $"<div class='code-block'>{log.StackTrace}</div>";
+                html += $"<div class='code-block'>{E(log.StackTrace)}</div>";
             }
 
             html += "</div></div>";
@@ -651,7 +669,7 @@ public class HubbleController
             html += "<div class='card'>";
             html += "<div class='card-header collapsed'><h2>Cabeceras de la Solicitud</h2></div>";
             html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{FormatJson(log.RequestHeaders)}</div>";
+            html += $"<div class='code-block'>{E(FormatJson(log.RequestHeaders))}</div>";
             html += "</div></div>";
             html += "</div>";
         }
@@ -662,7 +680,7 @@ public class HubbleController
             html += "<div class='card'>";
             html += "<div class='card-header collapsed'><h2>Datos de la Solicitud</h2></div>";
             html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{FormatJson(log.RequestData)}</div>";
+            html += $"<div class='code-block'>{E(FormatJson(log.RequestData))}</div>";
             html += "</div></div>";
             html += "</div>";
         }
@@ -673,7 +691,7 @@ public class HubbleController
             html += "<div class='card'>";
             html += "<div class='card-header collapsed'><h2>Datos de la Respuesta</h2></div>";
             html += "<div class='card-content'><div class='card-content-inner'>";
-            html += $"<div class='code-block'>{FormatJson(log.ResponseData)}</div>";
+            html += $"<div class='code-block'>{E(FormatJson(log.ResponseData))}</div>";
             html += "</div></div>";
             html += "</div>";
         }
@@ -689,27 +707,27 @@ public class HubbleController
             {
                 html += "<div class='query-item'>";
                 html += $"<div class='query-header'>";
-                html += $"<span class='query-type'>{query.OperationType ?? "QUERY"}</span>";
-                html += $"<span class='query-db'>{query.DatabaseType} - {query.DatabaseName}</span>";
+                html += $"<span class='query-type'>{E(query.OperationType ?? "QUERY")}</span>";
+                html += $"<span class='query-db'>{E(query.DatabaseType)} - {E(query.DatabaseName)}</span>";
                 html += $"<span class='query-time'>{query.ExecutionTime} ms</span>";
                 html += "</div>";
 
-                html += $"<div class='code-block sql'>{query.Query}</div>";
+                html += $"<div class='code-block sql'>{E(query.Query)}</div>";
 
                 if (!string.IsNullOrEmpty(query.Parameters))
                 {
                     html += "<h4>Parámetros</h4>";
-                    html += $"<div class='code-block'>{FormatJson(query.Parameters)}</div>";
+                    html += $"<div class='code-block'>{E(FormatJson(query.Parameters))}</div>";
                 }
 
                 if (!string.IsNullOrEmpty(query.TableName))
                 {
-                    html += $"<div class='query-meta'>Tabla: {query.TableName}</div>";
+                    html += $"<div class='query-meta'>Tabla: {E(query.TableName)}</div>";
                 }
 
                 if (!string.IsNullOrEmpty(query.CallerMethod))
                 {
-                    html += $"<div class='query-meta'>Método: {query.CallerMethod}</div>";
+                    html += $"<div class='query-meta'>Método: {E(query.CallerMethod)}</div>";
                 }
 
                 html += "</div>";
@@ -736,7 +754,7 @@ public class HubbleController
             foreach (var categoryGroup in logsByCategory)
             {
                 html += $"<div class='category-group'>";
-                html += $"<h3 class='category-title'>{categoryGroup.Key}</h3>";
+                html += $"<h3 class='category-title'>{E(categoryGroup.Key)}</h3>";
 
                 // Ordenar logs por timestamp dentro de cada categoría
                 var orderedLogs = categoryGroup.OrderBy(l => l.Timestamp).ToList();
@@ -746,21 +764,21 @@ public class HubbleController
                     var logClass = relatedLog.ActionName.ToLower();
                     html += "<div class='related-log-item'>";
                     html += $"<div class='related-log-header'>";
-                    html += $"<span class='log-type'><span class='log-level {logClass}'>{relatedLog.ActionName}</span></span>";
+                    html += $"<span class='log-type'><span class='log-level {E(logClass)}'>{E(relatedLog.ActionName)}</span></span>";
                     html += $"<span class='log-time'>{relatedLog.Timestamp.ToString("HH:mm:ss.fff")}</span>";
                     html += "</div>";
 
-                    html += $"<div class='code-block log'>{relatedLog.ResponseData}</div>";
+                    html += $"<div class='code-block log'>{E(relatedLog.ResponseData)}</div>";
 
                     if (!string.IsNullOrEmpty(relatedLog.ErrorMessage))
                     {
                         html += "<h4>Error</h4>";
-                        html += $"<div class='code-block error'>{relatedLog.ErrorMessage}</div>";
+                        html += $"<div class='code-block error'>{E(relatedLog.ErrorMessage)}</div>";
 
                         if (!string.IsNullOrEmpty(relatedLog.StackTrace))
                         {
                             html += "<h4>Stack Trace</h4>";
-                            html += $"<div class='code-block'>{relatedLog.StackTrace}</div>";
+                            html += $"<div class='code-block'>{E(relatedLog.StackTrace)}</div>";
                         }
                     }
 
@@ -798,7 +816,7 @@ public class HubbleController
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += LogoutButton();
         html += "</div>";
         html += "</div>";
 
@@ -835,20 +853,64 @@ public class HubbleController
 
         // Botón de logout si la autenticación está habilitada
         html += "<div class='header-right'>";
-        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += LogoutButton();
         html += "</div>";
         html += "</div>";
 
-        html += $"<h2 class='page-title'>{title}</h2>";
+        html += $"<h2 class='page-title'>{E(title)}</h2>";
 
         html += "<div class='card error-card'>";
-        html += $"<p>{message}</p>";
+        html += $"<p>{E(message)}</p>";
         html += "</div>";
 
         html += "</div>";
         html += GenerateHtmlFooter();
 
         return html;
+    }
+
+    /// <summary>
+    /// Codifica un valor para insertarlo de forma segura en el HTML (texto o atributos).
+    /// Todo dato que proviene de los logs debe pasar por aquí: puede contener contenido controlado por un atacante.
+    /// </summary>
+    private static string E(object? value) => HubbleHtml.Encode(value);
+
+    /// <summary>
+    /// Campo oculto con el token antiforgery para los formularios que modifican datos.
+    /// </summary>
+    private string AntiforgeryField()
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null)
+        {
+            return string.Empty;
+        }
+
+        var tokens = _antiforgery.GetAndStoreTokens(httpContext);
+        return $"<input type='hidden' name='{E(tokens.FormFieldName)}' value='{E(tokens.RequestToken)}'>";
+    }
+
+    /// <summary>
+    /// Botón de cierre de sesión (solo si la autenticación está habilitada).
+    /// </summary>
+    private string LogoutButton()
+    {
+        return _options.RequireAuthentication
+            ? $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>"
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// Construye el enlace de paginación conservando los filtros, con los valores codificados para URL y HTML.
+    /// </summary>
+    private static string PageLink(int page, int pageSize, string? method, string? url, string? statusGroup, string? logType)
+    {
+        var query = $"?page={page}&pageSize={pageSize}" +
+                    $"&method={Uri.EscapeDataString(method ?? string.Empty)}" +
+                    $"&url={Uri.EscapeDataString(url ?? string.Empty)}" +
+                    $"&statusGroup={Uri.EscapeDataString(statusGroup ?? string.Empty)}" +
+                    $"&logType={Uri.EscapeDataString(logType ?? string.Empty)}";
+        return E(query);
     }
 
     /// <summary>
@@ -910,7 +972,7 @@ public class HubbleController
 <head>
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>{title}</title>
+    <title>{E(title)}</title>
     <style>
         :root {{
             --primary-color: #6200ee;
@@ -1784,7 +1846,7 @@ public class HubbleController
         // Botones de navegación
         html += "<div class='header-right'>";
         html += $"<a href='{_prefixPath}{_basePath}' class='btn secondary'>Volver a logs</a>";
-        html += $"<a href='{_prefixPath}{_basePath}/logout' class='btn secondary'>Cerrar sesión</a>";
+        html += LogoutButton();
         html += "</div>";
         html += "</div>";
 
@@ -1805,45 +1867,28 @@ public class HubbleController
         html += "</div>";
         html += "</div>";
 
-        // Información sobre el último prune
+        // Retención de datos (índice TTL) y última limpieza manual
         html += "<div class='stats-card'>";
-        html += "<h3>Limpieza de datos</h3>";
+        html += "<h3>Retención de datos</h3>";
+        html += "<div class='info-message'>";
+        html += _options.EnableDataPrune
+            ? $"<p>MongoDB elimina automáticamente los logs con más de {_options.MaxLogAgeHours} horas (índice TTL).</p>"
+            : "<p>La retención automática está deshabilitada: los logs se conservan hasta que se eliminen manualmente.</p>";
+        html += "</div>";
 
         if (stats.LastPrune.LastPruneDate.HasValue)
         {
             var lastPruneDate = stats.LastPrune.LastPruneDate.Value.ToLocalTime();
-            var timeAgo = DateTime.Now - lastPruneDate;
-            var timeAgoText = FormatTimeAgo(timeAgo);
+            var timeAgoText = FormatTimeAgo(DateTime.Now - lastPruneDate);
 
-            html += "<div class='stats-grid'>";
+            html += "<div class='stats-grid' style='margin-top: 15px;'>";
             html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:dd/MM/yyyy}</span><span class='stat-label'>Fecha</span></div>";
             html += $"<div class='stat-item'><span class='stat-value'>{lastPruneDate:HH:mm:ss}</span><span class='stat-label'>Hora</span></div>";
             html += $"<div class='stat-item'><span class='stat-value'>{stats.LastPrune.LogsDeleted}</span><span class='stat-label'>Logs eliminados</span></div>";
-            html += $"<div class='stat-item time-ago'><span class='time-ago-text'>Última limpieza: {timeAgoText}</span></div>";
-            html += "</div>";
-
-            // Reemplazar botón con mensaje informativo
-            html += "<div class='info-message' style='margin-top: 15px;'>";
-            html += "<p>La limpieza automática está habilitada con un intervalo de " + config.DataPruneIntervalHours + " horas.</p>";
+            html += $"<div class='stat-item time-ago'><span class='time-ago-text'>Última limpieza manual: {timeAgoText}</span></div>";
             html += "</div>";
         }
-        else
-        {
-            html += "<p>No se ha realizado ninguna limpieza automática de datos.</p>";
 
-            if (config.EnableDataPrune)
-            {
-                html += "<div class='info-message'>";
-                html += "<p>La limpieza automática está habilitada y se ejecutará cada " + config.DataPruneIntervalHours + " horas.</p>";
-                html += "</div>";
-            }
-            else
-            {
-                html += "<div class='info-message'>";
-                html += "<p>La limpieza automática está deshabilitada.</p>";
-                html += "</div>";
-            }
-        }
         html += "</div>";
 
         // Información de estadística sin botón de recalcular
@@ -1863,27 +1908,27 @@ public class HubbleController
         html += "<div class='config-form'>";
         html += "<div class='config-group'>";
         html += "<label>Servicio:</label>";
-        html += $"<div class='config-value'>{config.ServiceName}</div>";
+        html += $"<div class='config-value'>{E(_options.ServiceName)}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Versión:</label>";
-        html += $"<div class='config-value'>{config.SystemInfo.Version}</div>";
+        html += $"<div class='config-value'>{E(_version)}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Base de datos:</label>";
-        html += $"<div class='config-value'>{config.SystemInfo.DatabaseName}</div>";
+        html += $"<div class='config-value'>{E(_options.DatabaseName)}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>MongoDB:</label>";
-        html += $"<div class='config-value'>Driver {config.SystemInfo.MongoDBVersion}</div>";
+        html += $"<div class='config-value'>Driver {E(config.SystemInfo.MongoDBVersion)}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Zona horaria:</label>";
-        html += $"<div class='config-value'>{(string.IsNullOrEmpty(config.TimeZoneId) ? "UTC" : config.TimeZoneId)}</div>";
+        html += $"<div class='config-value'>{E(string.IsNullOrEmpty(_options.TimeZoneId) ? "UTC" : _options.TimeZoneId)}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Diagnósticos:</label>";
-        html += $"<div class='config-value'>Activado</div>";
+        html += $"<div class='config-value'>{(_options.EnableDiagnostics ? "Activado" : "Desactivado")}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Ruta base:</label>";
@@ -1904,7 +1949,8 @@ public class HubbleController
         html += "<div class='config-group'>";
         html += "<label>Inicio del servicio:</label>";
 
-        var startTime = config.SystemInfo.StartTime.ToLocalTime();
+        // Inicio del proceso actual (no la fecha en que se creó la configuración en MongoDB)
+        var startTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
         var uptime = DateTime.Now - startTime;
         var uptimeText = FormatTimeAgo(uptime);
 
@@ -1915,19 +1961,19 @@ public class HubbleController
 
         // Configuración de limpieza
         html += "<div class='stats-card'>";
-        html += "<h3>Configuración de limpieza</h3>";
+        html += "<h3>Retención y almacenamiento</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group'>";
-        html += "<label>Habilitar limpieza automática:</label>";
-        html += $"<div class='config-value'>{(config.EnableDataPrune ? "Activado" : "Desactivado")}</div>";
-        html += "</div>";
-        html += "<div class='config-group'>";
-        html += "<label>Intervalo de limpieza (horas):</label>";
-        html += $"<div class='config-value'>{config.DataPruneIntervalHours}</div>";
+        html += "<label>Retención automática (TTL):</label>";
+        html += $"<div class='config-value'>{(_options.EnableDataPrune ? "Activada" : "Desactivada")}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Edad máxima de los logs (horas):</label>";
-        html += $"<div class='config-value'>{config.MaxLogAgeHours}</div>";
+        html += $"<div class='config-value'>{(_options.EnableDataPrune ? _options.MaxLogAgeHours.ToString() : "Sin límite")}</div>";
+        html += "</div>";
+        html += "<div class='config-group'>";
+        html += "<label>Índices de MongoDB:</label>";
+        html += $"<div class='config-value'>{E(DescribeStorageStatus())}</div>";
         html += "</div>";
         html += "</div>";
         html += "<div class='info-message'>";
@@ -1940,23 +1986,16 @@ public class HubbleController
         html += "<h3>Configuración de captura</h3>";
         html += "<div class='config-form'>";
         html += "<div class='config-group'>";
-        html += "<label>Capturar solicitudes HTTP (HUBBLE_ENABLE_DIAGNOSTICS):</label>";
-
-        // Obtener el valor directamente de la variable de entorno
-        var enableDiagnostics = Environment.GetEnvironmentVariable("HUBBLE_ENABLE_DIAGNOSTICS");
-        var isEnabledStr = !string.IsNullOrEmpty(enableDiagnostics) &&
-                          (enableDiagnostics.ToLower() == "true" || enableDiagnostics == "1")
-                          ? "Activado" : "Desactivado";
-
-        html += $"<div class='config-value'>{isEnabledStr}</div>";
+        html += "<label>Capturar solicitudes HTTP:</label>";
+        html += $"<div class='config-value'>{(_options.CaptureHttpRequests ? "Activado" : "Desactivado")}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
-        html += "<label>Capturar mensajes de ILogger (HUBBLE_CAPTURE_LOGGER_MESSAGES):</label>";
-        html += $"<div class='config-value'>Activado</div>";
+        html += "<label>Capturar mensajes de ILogger:</label>";
+        html += $"<div class='config-value'>{(_options.CaptureLoggerMessages ? "Activado" : "Desactivado")}</div>";
         html += "</div>";
         html += "<div class='config-group'>";
         html += "<label>Nivel mínimo de log:</label>";
-        html += $"<div class='config-value'>{config.MinimumLogLevel}</div>";
+        html += $"<div class='config-value'>{E(_options.MinimumLogLevel)}</div>";
         html += "</div>";
         html += "</div>";
         html += "<div class='info-message'>";
@@ -1970,30 +2009,18 @@ public class HubbleController
         html += "<div class='config-form'>";
         html += "<div class='config-group ignored-paths'>";
 
-        // Obtener las rutas ignoradas desde el servicio o mostrar el placeholder
-        var hubbleIgnorePaths = Environment.GetEnvironmentVariable("HUBBLE_IGNORE_PATHS");
-        if (!string.IsNullOrEmpty(hubbleIgnorePaths))
+        if (_options.IgnorePaths.Count > 0)
         {
-            var ignorePaths = hubbleIgnorePaths.Split(',').Select(p => p.Trim()).ToList();
-
-            if (ignorePaths.Count > 0)
+            html += "<ul class='ignored-paths-list'>";
+            foreach (var path in _options.IgnorePaths)
             {
-                html += "<div class='config-value'>HUBBLE_IGNORE_PATHS:</div>";
-                html += "<ul class='ignored-paths-list'>";
-                foreach (var path in ignorePaths)
-                {
-                    html += $"<li>{path}</li>";
-                }
-                html += "</ul>";
+                html += $"<li>{E(path)}</li>";
             }
-            else
-            {
-                html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS vacío).</div>";
-            }
+            html += "</ul>";
         }
         else
         {
-            html += "<div class='config-value'>No hay rutas ignoradas configuradas (HUBBLE_IGNORE_PATHS no definido).</div>";
+            html += "<div class='config-value'>No hay rutas ignoradas configuradas.</div>";
         }
 
         html += "</div>";
@@ -2071,8 +2098,7 @@ public class HubbleController
 
         try
         {
-            var config = await _statsService.GetSystemConfigurationAsync();
-            var maxAgeHours = config.MaxLogAgeHours > 0 ? config.MaxLogAgeHours : 24;
+            var maxAgeHours = _options.MaxLogAgeHours > 0 ? _options.MaxLogAgeHours : 24;
             var cutoffDate = DateTime.UtcNow.AddHours(-maxAgeHours);
 
             var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);
@@ -2204,6 +2230,26 @@ public class HubbleController
         {
             return GenerateErrorPage("Error", $"Error al guardar las rutas ignoradas: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Describe el estado de los índices (incluido el TTL de retención) para la página de configuración.
+    /// </summary>
+    private string DescribeStorageStatus()
+    {
+        if (_storageStatus == null)
+        {
+            return "Desconocido";
+        }
+
+        if (_storageStatus.IndexesReady)
+        {
+            return "Creados";
+        }
+
+        return _storageStatus.LastError == null
+            ? "Pendientes"
+            : $"Error ({_storageStatus.LastError}). Se reintentará automáticamente.";
     }
 
     /// <summary>
@@ -2471,8 +2517,7 @@ public class HubbleController
                 };
             }
 
-            var config = await _statsService.GetSystemConfigurationAsync();
-            var maxAgeHours = config.MaxLogAgeHours > 0 ? config.MaxLogAgeHours : 24;
+            var maxAgeHours = _options.MaxLogAgeHours > 0 ? _options.MaxLogAgeHours : 24;
             var cutoffDate = DateTime.UtcNow.AddHours(-maxAgeHours);
 
             var logsDeleted = await _hubbleService.DeleteLogsOlderThanAsync(cutoffDate);

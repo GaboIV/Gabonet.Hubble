@@ -37,10 +37,12 @@ Luego configura Hubble en tu `Program.cs`:
 
 ```csharp
 builder.Services.AddHubble(
-    builder.Configuration,
-    builder.Configuration.GetConnectionString("MongoConnection")!,
-    "HubbleDB"
-);
+    builder.Configuration.GetSection("Hubble"),                    // Sección "Hubble" de appsettings.json
+    options =>
+    {
+        options.ConnectionString = builder.Configuration.GetConnectionString("MongoConnection")!;
+        options.DatabaseName = "HubbleDB";
+    });
 ```
 
 #### 2. Configuración Manual
@@ -58,7 +60,9 @@ builder.Services.AddHubble(options =>
 
 ### Autenticación con Cookies
 
-Una vez que te autentiques a través de la interfaz web visitando `/hubble`, se creará una cookie que será válida para todas las solicitudes de API durante 8 horas.
+Una vez que te autentiques a través de la interfaz web visitando `/hubble`, se creará una cookie de sesión cifrada y firmada (ASP.NET Core Data Protection) válida durante 8 horas para las rutas de Hubble. Cambiar el usuario o la contraseña invalida las sesiones existentes.
+
+> Si tu aplicación corre en varias instancias, configura un almacén compartido de claves de Data Protection (por ejemplo `PersistKeysToFileSystem` o Redis); de lo contrario la cookie emitida por una instancia no será válida en otra.
 
 ### Autenticación Básica HTTP
 
@@ -67,6 +71,14 @@ Los endpoints de API también soportan autenticación básica HTTP usando las mi
 ```bash
 curl -u admin:hubble123 "https://tu-aplicacion/hubble/api/logs"
 ```
+
+Sin credenciales válidas la API responde `401 Unauthorized` con la cabecera `WWW-Authenticate: Basic`. Tras 5 intentos fallidos desde la misma IP en 15 minutos, el cliente queda bloqueado 15 minutos (`429 Too Many Requests`).
+
+### Reglas de seguridad de la API
+
+- **Filtro de IPs**: `Security.AllowedIps` se aplica al dashboard y a la API de Hubble (`403 Forbidden` si la IP no está permitida). No afecta al resto de tu aplicación.
+- **Protección CSRF**: toda petición `POST` a la API debe enviar `Content-Type: application/json` (si no, responde `415 Unsupported Media Type`). Un formulario de otro sitio no puede enviar ese tipo de contenido sin una petición CORS previa, por lo que no puede disparar acciones en nombre de un usuario autenticado. No expongas las rutas de Hubble en una política CORS permisiva.
+- **Acciones que modifican datos** solo aceptan `POST` o `DELETE`; nunca `GET`.
 
 ## Endpoints Disponibles
 
@@ -82,7 +94,7 @@ Obtiene una lista paginada de logs con filtros opcionales.
 - `statusGroup` (string, opcional): Filtrar por grupo de códigos de estado (200, 400, 500)
 - `logType` (string, opcional): Filtrar por tipo de log (ApplicationLogger, HTTP)
 - `page` (int, opcional): Número de página (default: 1)
-- `pageSize` (int, opcional): Tamaño de página (default: 50)
+- `pageSize` (int, opcional): Tamaño de página (default: 50, máximo: 200)
 
 #### Ejemplo de respuesta:
 ```json
@@ -224,7 +236,7 @@ curl -X GET "https://tu-aplicacion/hubble/api/config"
 
 ### 5. Ejecutar Limpieza Manual
 
-**GET** `/api/prune`
+**POST** `/api/prune`
 
 Ejecuta una limpieza manual de logs basada en la configuración actual.
 
@@ -240,12 +252,14 @@ Ejecuta una limpieza manual de logs basada en la configuración actual.
 
 #### Ejemplo de uso con curl:
 ```bash
-curl -X GET "https://tu-aplicacion/hubble/api/prune"
+curl -X POST "https://tu-aplicacion/hubble/api/prune" \
+  -u admin:hubble123 \
+  -H "Content-Type: application/json"
 ```
 
 ### 6. Recalcular Estadísticas
 
-**GET** `/api/recalculate-stats`
+**POST** `/api/recalculate-stats`
 
 Recalcula las estadísticas del sistema.
 
@@ -259,7 +273,9 @@ Recalcula las estadísticas del sistema.
 
 #### Ejemplo de uso con curl:
 ```bash
-curl -X GET "https://tu-aplicacion/hubble/api/recalculate-stats"
+curl -X POST "https://tu-aplicacion/hubble/api/recalculate-stats" \
+  -u admin:hubble123 \
+  -H "Content-Type: application/json"
 ```
 
 ### 7. Guardar Configuración de Limpieza
@@ -362,8 +378,12 @@ curl -X POST "https://tu-aplicacion/hubble/api/config/ignore-paths" \
 
 - **200 OK**: Operación exitosa
 - **400 Bad Request**: Solicitud inválida (cuerpo JSON malformado)
+- **401 Unauthorized**: Falta autenticación o las credenciales no son válidas
+- **403 Forbidden**: La IP no está en `Security.AllowedIps`, o la operación está deshabilitada (por ejemplo `AllowDeleteAll = false`)
 - **404 Not Found**: Endpoint o recurso no encontrado
-- **405 Method Not Allowed**: Método HTTP no soportado
+- **405 Method Not Allowed**: Método HTTP no soportado (por ejemplo `GET /api/prune`)
+- **415 Unsupported Media Type**: Petición `POST` sin `Content-Type: application/json`
+- **429 Too Many Requests**: Demasiados intentos de autenticación fallidos desde la misma IP
 - **500 Internal Server Error**: Error interno del servidor
 
 ## Uso con Postman
@@ -373,7 +393,7 @@ Para usar estos endpoints con Postman:
 1. **Importar Collection**: Puedes crear una nueva colección en Postman con todos estos endpoints
 2. **Base URL**: Configura la variable `{{baseUrl}}` con tu URL base (ej: `https://tu-aplicacion/hubble`)
 3. **Headers**: Para endpoints POST, asegúrate de incluir `Content-Type: application/json`
-4. **Autenticación**: Si está habilitada, primero autentícate a través de la interfaz web o configura las cookies necesarias
+4. **Autenticación**: Si está habilitada, usa la pestaña *Authorization* con el tipo *Basic Auth* y las credenciales configuradas
 
 ## Ejemplos de Colección Postman
 
